@@ -1,0 +1,27 @@
+{% if ospf and ospf.networks %}
+router ospf {{ ospf.process_id }}
+{% if ospf.router_id %}
+ router-id {{ ospf.router_id }}
+{% endif %}
+{% for pi in ospf.passive_interfaces %}
+ passive-interface {{ pi }}
+{% endfor %}
+{% for n in ospf.networks %}
+ network {{ n.network }} {{ n.wildcard }} area {{ n.area }}
+{% endfor %}
+!
+{% endif %}
+{% if bgp and (bgp.networks or bgp.neighbors) %}
+router bgp {{ bgp.asn }}
+{% if bgp.router_id %}
+ bgp router-id {{ bgp.router_id }}
+{% endif %}
+ bgp log-neighbor-changes
+{% for n in bgp.networks %}
+ network {{ n.network }} mask {{ n.mask }}
+{% endfor %}
+{% for nb in bgp.neighbors %}
+ neighbor {{ nb.ip }} remote-as {{ nb.remote_as }}
+{% endfor %}
+!
+{% endif %}

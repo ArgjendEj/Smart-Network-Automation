@@ -1,0 +1,14 @@
+---
+# Create VLANs on switches. Variables come from the generated inventory or
+# `--extra-vars '{"vlans":[{"vlan_id":10,"name":"SALES"}]}'`.
+- name: Configure VLANs
+  hosts: switches
+  gather_facts: false
+  tasks:
+    - name: Ensure VLANs exist
+      cisco.ios.ios_vlans:
+        config: "{{ vlans | map('combine', {'name': item.name}) | list }}"
+        state: merged
+      loop: "{{ vlans | default([]) }}"
+      loop_control:
+        label: "vlan {{ item.vlan_id }}"

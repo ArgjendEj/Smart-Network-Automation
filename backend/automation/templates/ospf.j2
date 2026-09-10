@@ -1,0 +1,8 @@
+router ospf {{ process_id }}
+{% for n in networks %}
+ network {{ n.network }} {{ n.wildcard }} area {{ n.area }}
+{% endfor %}
+{% for pi in passive_interfaces %}
+ passive-interface {{ pi }}
+{% endfor %}
+!

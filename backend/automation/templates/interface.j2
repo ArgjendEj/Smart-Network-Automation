@@ -1,0 +1,25 @@
+{% for i in interfaces %}
+interface {{ i.name }}
+{% if i.description %}
+ description {{ i.description }}
+{% endif %}
+{% if i.mode == 'access' %}
+ switchport mode access
+{% if i.vlan_id %}
+ switchport access vlan {{ i.vlan_id }}
+{% endif %}
+{% elif i.mode == 'trunk' %}
+ switchport mode trunk
+{% elif i.mode == 'routed' %}
+ no switchport
+{% endif %}
+{% if i.ip_address and i.subnet_mask %}
+ ip address {{ i.ip_address }} {{ i.subnet_mask }}
+{% endif %}
+{% if i.enabled %}
+ no shutdown
+{% else %}
+ shutdown
+{% endif %}
+!
+{% endfor %}

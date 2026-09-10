@@ -1,0 +1,19 @@
+---
+# Configure IOS DHCP pools on the router.
+# extra-vars: {"pools":[{"pool_name":"SALES_POOL","network":"10.10.1.0",
+#             "netmask":"255.255.255.0","default_gateway":"10.10.1.1","dns":"8.8.8.8"}]}
+- name: Configure DHCP pools
+  hosts: routers
+  gather_facts: false
+  tasks:
+    - name: Build DHCP pool config
+      cisco.ios.ios_config:
+        lines:
+          - "network {{ item.network }} {{ item.netmask }}"
+          - "default-router {{ item.default_gateway }}"
+          - "dns-server {{ item.dns | default('8.8.8.8') }}"
+        parents: "ip dhcp pool {{ item.pool_name }}"
+        save_when: modified
+      loop: "{{ pools | default([]) }}"
+      loop_control:
+        label: "{{ item.pool_name }}"

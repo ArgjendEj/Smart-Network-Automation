@@ -1,0 +1,12 @@
+{% for p in pools %}
+{% if p.exclude_from and p.exclude_to %}
+ip dhcp excluded-address {{ p.exclude_from }} {{ p.exclude_to }}
+{% endif %}
+ip dhcp pool {{ p.pool_name }}
+ network {{ p.network }} {{ p.netmask }}
+ default-router {{ p.default_gateway }}
+{% if p.dns %}
+ dns-server {{ p.dns }}
+{% endif %}
+!
+{% endfor %}

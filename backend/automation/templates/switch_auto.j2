@@ -1,0 +1,39 @@
+!
+! ===== SWITCH : {{ hostname }} (auto-generated from topology) =====
+!
+hostname {{ hostname }}
+!
+no ip domain-lookup
+!
+spanning-tree mode pvst
+!
+{% if vlan_id %}
+vlan {{ vlan_id }}
+ name {{ vlan_name }}
+!
+interface {{ uplink }}
+ description ### Uplink to {{ router_hostname }} - {{ vlan_name }} ({{ network }}) ###
+ switchport mode access
+ switchport access vlan {{ vlan_id }}
+ no shutdown
+!
+interface range {{ access_range }}
+ description ### {{ vlan_name }} access ###
+ switchport mode access
+ switchport access vlan {{ vlan_id }}
+ spanning-tree portfast
+ no shutdown
+!
+{% else %}
+interface range {{ access_range }}
+ switchport mode access
+ spanning-tree portfast
+ no shutdown
+!
+{% endif %}
+banner motd ^C Authorized access only - {{ hostname }} ^C
+!
+line con 0
+ logging synchronous
+!
+end

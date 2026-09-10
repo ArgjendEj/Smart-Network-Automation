@@ -1,0 +1,38 @@
+!
+! ===== SWITCH : {{ hostname }} (pure Layer 2 - no IP addressing) =====
+!
+hostname {{ hostname }}
+!
+no ip domain-lookup
+!
+spanning-tree mode pvst
+!
+{% for v in vlans %}
+vlan {{ v.vlan_id }}
+ name {{ v.name }}
+!
+{% endfor %}
+interface {{ uplink }}
+ description ### Trunk to {{ router_hostname }} ###
+{% if trunk_encap_needed %}
+ switchport trunk encapsulation dot1q
+{% endif %}
+ switchport mode trunk
+ switchport trunk allowed vlan {{ allowed_vlans }}
+ no shutdown
+!
+{% for a in access_ports %}
+interface range {{ a.range }}
+ description ### {{ a.department }} - access ###
+ switchport mode access
+ switchport access vlan {{ a.vlan_id }}
+ spanning-tree portfast
+ no shutdown
+!
+{% endfor %}
+banner motd ^C Authorized access only - {{ hostname }} ^C
+!
+line con 0
+ logging synchronous
+!
+end

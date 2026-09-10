@@ -1,0 +1,98 @@
+!
+! ===== ROUTER : {{ hostname }} (auto-generated from topology) =====
+!
+hostname {{ hostname }}
+!
+no ip domain-lookup
+ip domain-name lab.local
+service password-encryption
+!
+ip routing
+!
+{% if not dhcp_relay_ip %}
+{% for lan in lans %}
+ip dhcp excluded-address {{ lan.exclude_from }} {{ lan.exclude_to }}
+{% endfor %}
+!
+{% for lan in lans %}
+ip dhcp pool {{ lan.pool_name }}
+ network {{ lan.network }} {{ lan.netmask }}
+ default-router {{ lan.gateway }}
+ dns-server {{ dns }}
+!
+{% endfor %}
+{% endif %}
+{% for lan in lans %}
+interface {{ lan.iface }}
+ description ### LAN {{ lan.network }}/{{ lan.prefix }} ###
+ ip address {{ lan.gateway }} {{ lan.netmask }}
+{% if dhcp_relay_ip %}
+ ip helper-address {{ dhcp_relay_ip }}
+{% endif %}
+{% if nat %}
+ ip nat inside
+{% endif %}
+ no shutdown
+!
+{% endfor %}
+{% for wan in wans %}
+interface {{ wan.iface }}
+ description ### Link to {{ wan.peer_hostname }} ###
+ ip address {{ wan.ip }} {{ wan.netmask }}
+{% if nat and wan.iface == nat_outside_iface %}
+ ip nat outside
+{% endif %}
+ no shutdown
+!
+{% endfor %}
+{% if nat and nat_outside_iface and lans %}
+{% for lan in lans %}
+access-list {{ 10 + loop.index0 }} permit {{ lan.network }} {{ lan.wildcard }}
+{% endfor %}
+!
+{% for lan in lans %}
+ip nat inside source list {{ 10 + loop.index0 }} interface {{ nat_outside_iface }} overload
+{% endfor %}
+!
+{% endif %}
+{% if routing in ['ospf', 'both'] and (lans or wans) %}
+router ospf {{ ospf_process }}
+ router-id {{ router_id }}
+{% for lan in lans %}
+ passive-interface {{ lan.iface }}
+{% endfor %}
+{% for lan in lans %}
+ network {{ lan.network }} {{ lan.wildcard }} area 0
+{% endfor %}
+{% for wan in wans %}
+ network {{ wan.network }} {{ wan.wildcard }} area 0
+{% endfor %}
+!
+{% endif %}
+{% if routing in ['bgp', 'both'] and (lans or wans) %}
+router bgp {{ asn }}
+ bgp router-id {{ router_id }}
+ bgp log-neighbor-changes
+{% for lan in lans %}
+ network {{ lan.network }} mask {{ lan.netmask }}
+{% endfor %}
+{% for wan in wans %}
+ neighbor {{ wan.peer_ip }} remote-as {{ wan.peer_asn }}
+{% endfor %}
+!
+{% endif %}
+{% if ntp_ip %}
+ntp server {{ ntp_ip }}
+!
+{% endif %}
+{% if syslog_ip %}
+logging host {{ syslog_ip }}
+logging trap informational
+!
+{% endif %}
+banner motd ^C Authorized access only - {{ hostname }} ^C
+!
+line con 0
+ logging synchronous
+!
+end

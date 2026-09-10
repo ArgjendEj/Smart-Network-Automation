@@ -1,0 +1,67 @@
+!
+! ===== ROUTER : {{ hostname }} =====
+!
+hostname {{ hostname }}
+!
+no ip domain-lookup
+ip domain-name {{ domain }}
+!
+ip routing
+!
+{% if enable_dhcp and departments %}
+{% for d in departments %}
+ip dhcp excluded-address {{ d.exclude_from }} {{ d.exclude_to }}
+{% endfor %}
+!
+{% for d in departments %}
+ip dhcp pool {{ d.pool_name }}
+ network {{ d.network }} {{ d.netmask }}
+ default-router {{ d.gateway }}
+ dns-server {{ dns }}
+!
+{% endfor %}
+{% endif %}
+{% if departments %}
+interface {{ uplink }}
+ description ### Trunk to {{ switch_hostname }} ###
+ no ip address
+ duplex auto
+ speed auto
+ no shutdown
+!
+{% for d in departments %}
+interface {{ uplink }}.{{ d.vlan_id }}
+ description ### {{ d.name }} - VLAN {{ d.vlan_id }} ###
+ encapsulation dot1Q {{ d.vlan_id }}
+ ip address {{ d.gateway }} {{ d.netmask }}
+ no shutdown
+!
+{% endfor %}
+{% endif %}
+{% for l in p2p_links %}
+interface {{ l.local_if }}
+ description ### Point-to-point to {{ l.peer_hostname }} ###
+ ip address {{ l.local_ip }} {{ l.mask }}
+ no shutdown
+!
+{% endfor %}
+{% if departments or p2p_links %}
+router ospf {{ ospf_process }}
+ router-id {{ router_id }}
+{% for d in departments %}
+ passive-interface {{ uplink }}.{{ d.vlan_id }}
+{% endfor %}
+{% for d in departments %}
+ network {{ d.network }} {{ d.wildcard }} area {{ ospf_area }}
+{% endfor %}
+{% for l in p2p_links %}
+ network {{ l.network }} {{ l.wildcard }} area {{ ospf_area }}
+{% endfor %}
+!
+{% endif %}
+banner motd ^C Authorized access only - {{ hostname }} ^C
+!
+line con 0
+ logging synchronous
+!
+end
