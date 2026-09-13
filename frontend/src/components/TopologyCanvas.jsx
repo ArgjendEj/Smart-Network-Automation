@@ -5,7 +5,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css'
 import { TopologyAPI } from '../services/api'
 import ConnectionLine from './ConnectionLine'
-import DeviceNode from './DeviceNode'
+import DeviceNode, { PORTS } from './DeviceNode'
 
 function toNode(n) {
   return {
@@ -19,13 +19,30 @@ function toNode(n) {
 const shortHandle = (iface) => (iface || '')
   .replace('GigabitEthernet', 'Gi').replace('FastEthernet', 'Fa') || null
 
-function toEdge(e) {
+// pc/phone/printer/server carry the SAME port name on both sides (a single
+// "eth0" NIC drawn twice for easy cabling) - the bottom dot's real DOM id
+// carries a "__b" suffix (see DeviceNode.jsx) so React Flow can tell them apart
+const isSymmetricPort = (type, name) => {
+  const p = PORTS[type] || PORTS.pc
+  return p.top.includes(name) && p.bottom.includes(name)
+}
+
+// point a symmetric port toward whichever side the other end of the cable is
+// on, so the line never has to loop back over the node to reach it
+const sideFor = (name, type, myY, otherY) =>
+  isSymmetricPort(type, name) && myY < otherY ? `${name}__b` : name
+
+function toEdge(e, nodeById) {
+  const src = nodeById.get(String(e.source))
+  const tgt = nodeById.get(String(e.target))
+  const sourceShort = shortHandle(e.source_interface)
+  const targetShort = shortHandle(e.target_interface)
   return {
     id: String(e.id),
     source: String(e.source),
     target: String(e.target),
-    sourceHandle: shortHandle(e.source_interface),
-    targetHandle: shortHandle(e.target_interface),
+    sourceHandle: src && tgt && sourceShort ? sideFor(sourceShort, src.type, src.y, tgt.y) : sourceShort,
+    targetHandle: src && tgt && targetShort ? sideFor(targetShort, tgt.type, tgt.y, src.y) : targetShort,
     type: 'connection',
     data: {
       link_type: e.link_type,
@@ -59,12 +76,19 @@ export default function TopologyCanvas({ onGraphChange }) {
   const reload = useCallback(() => {
     TopologyAPI.graph().then((r) => {
       setNodes(r.data.nodes.map(toNode))
-      setEdges(r.data.edges.map((e) => {
-        const edge = toEdge(e)
+      const nodeById = new Map(r.data.nodes.map((n) => [String(n.id), { type: n.type, y: n.y }]))
+      const buildEdges = () => r.data.edges.map((e) => {
+        const edge = toEdge(e, nodeById)
         edge.data.onDelete = () =>
           removeById(edge.id, { a: e.source_interface, b: e.target_interface })
         return edge
-      }))
+      })
+      // on a cold load the device nodes (and their ports) haven't painted yet -
+      // attaching edges to them one frame too early makes React Flow anchor the
+      // very first render at the wrong spot (fixed as soon as anything else
+      // causes a re-render, which is why a manual refresh "fixes" it). Wait two
+      // frames so the nodes are on screen before the cables are drawn.
+      requestAnimationFrame(() => requestAnimationFrame(() => setEdges(buildEdges())))
       onGraphChange?.(r.data)
     })
   }, [setNodes, setEdges, onGraphChange, removeById])
@@ -74,9 +98,12 @@ export default function TopologyCanvas({ onGraphChange }) {
 
   const expand = (h) => {
     if (!h) return ''
-    if (h.startsWith('Gi')) return 'GigabitEthernet' + h.slice(2)
-    if (h.startsWith('Fa')) return 'FastEthernet' + h.slice(2)
-    return h
+    // "__b" marks the bottom twin of a port that also exists on top (pc,
+    // phone, printer, server) - same physical interface, just a second dot
+    const base = h.replace(/__b$/, '')
+    if (base.startsWith('Gi')) return 'GigabitEthernet' + base.slice(2)
+    if (base.startsWith('Fa')) return 'FastEthernet' + base.slice(2)
+    return base
   }
 
   const onConnect = useCallback(async (params) => {

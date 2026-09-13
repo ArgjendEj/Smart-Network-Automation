@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import PasswordInput from './PasswordInput'
 
 const EMPTY = {
   name: '', hostname: '', device_type: 'router',
@@ -34,8 +35,8 @@ export default function DeviceForm({ initial, onSave, onCancel }) {
   }
 
   const isRouter = form.device_type === 'router'
+  const isSwitch = form.device_type === 'switch'
   const isServer = form.device_type === 'server'
-  const autoIps = (initial?.ip_addresses || []).filter((x) => x.role === 'lan' || x.role === 'link')
 
   const roleSet = new Set((form.services || '').split(',').map((s) => s.trim()).filter(Boolean))
   const toggleRole = (role) => {
@@ -68,16 +69,25 @@ export default function DeviceForm({ initial, onSave, onCancel }) {
             <input value={form.mgmt_ip || ''} onChange={set('mgmt_ip')} placeholder="192.168.0.0" />
           </div>
         )}
-        {isRouter && (
+        {(isRouter || isSwitch) && (
           <>
             <div className="field"><label className="muted">SSH username</label>
               <input value={form.ssh_username || ''} onChange={set('ssh_username')} /></div>
             <div className="field"><label className="muted">SSH password</label>
-              <input type="password" value={form.ssh_password || ''} onChange={set('ssh_password')} /></div>
+              <PasswordInput value={form.ssh_password || ''} onChange={set('ssh_password')} /></div>
             <div className="field"><label className="muted">Enable secret</label>
-              <input type="password" value={form.ssh_secret || ''} onChange={set('ssh_secret')} /></div>
-            <div className="field"><label className="muted">Netmiko driver</label>
-              <input value={form.netmiko_driver || 'cisco_ios'} onChange={set('netmiko_driver')} /></div>
+              <PasswordInput value={form.ssh_secret || ''} onChange={set('ssh_secret')} /></div>
+            {isRouter && (
+              <div className="field"><label className="muted">Netmiko driver</label>
+                <input value={form.netmiko_driver || 'cisco_ios'} onChange={set('netmiko_driver')} /></div>
+            )}
+            {isSwitch && (
+              <div className="field" style={{ alignSelf: 'end' }}>
+                <span className="muted" style={{ fontSize: 11 }}>
+                  SSH block only — the switch stays Layer 2 (no IP).
+                </span>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -111,11 +121,16 @@ export default function DeviceForm({ initial, onSave, onCancel }) {
       {isRouter && (
         <div style={{ marginTop: 10 }}>
           <label className="muted">Interface IP addresses (for specific ports)</label>
+          <p className="muted" style={{ fontSize: 12, margin: '2px 0 0' }}>
+            A <b>Class C</b> address (<b>192.168.0.0</b>) here becomes a LAN gateway —
+            each switch you cable to the router takes the next one. A <b>Class A</b>
+            address (<b>10.0.0.0</b>) is used for a router-to-router link.
+          </p>
           {ips.map((x, i) => (
             <div className="row" key={i} style={{ marginTop: 8 }}>
               <input placeholder="GigabitEthernet0/1" style={{ width: 190 }}
                 value={x.interface} onChange={(e) => setIp(i, 'interface', e.target.value)} />
-              <input placeholder="10.0.1.2/24" style={{ width: 160 }}
+              <input placeholder="192.168.0.0  or  10.0.0.0" style={{ width: 210 }}
                 value={x.address} onChange={(e) => setIp(i, 'address', e.target.value)} />
               <button type="button" onClick={() => setIps(ips.filter((_, j) => j !== i))}>✕</button>
             </div>
@@ -124,11 +139,6 @@ export default function DeviceForm({ initial, onSave, onCancel }) {
             onClick={() => setIps([...ips, { interface: '', address: '' }])}>
             + interface IP
           </button>
-          {autoIps.length > 0 && (
-            <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-              Auto-configured: {autoIps.map((x) => `${x.interface} ${x.ip}`).join(' · ')}
-            </p>
-          )}
         </div>
       )}
 

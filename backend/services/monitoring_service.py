@@ -216,8 +216,8 @@ def simulate_reachability(db: Session, source: str, target: str) -> dict:
     if uf.find(str(src_net)) == uf.find(str(dst_net)):
         via = component_routers(str(src_net))
         return {"ok": True, "via": via,
-                "reason": (f"Routed path via {', '.join(via)} (OSPF). Ping should succeed."
-                           if via else "Connected path. Ping should succeed."),
+                "reason": (f"Routed path via {', '.join(via)}."
+                           if via else "Connected path."),
                 "source_net": str(src_net), "target_net": str(dst_net)}
 
     return {"ok": False, "source_net": str(src_net), "target_net": str(dst_net),

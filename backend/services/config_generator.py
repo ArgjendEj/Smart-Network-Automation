@@ -173,14 +173,19 @@ def generate_auto_switch_config(
     vlan_name: str | None = None,
     network: str | None = None,
     access_range: str = "FastEthernet0/1-24",
+    ssh_username: str | None = None,
+    ssh_password: str | None = None,
+    ssh_secret: str | None = None,
 ) -> str:
     """Pure L2 switch config produced by the topology auto-configurator: one VLAN
     for the LAN segment it carries (access mode uplink - the router side is a
-    plain routed interface, not a dot1Q trunk)."""
+    plain routed interface, not a dot1Q trunk). SSH management block is emitted
+    only when credentials are set - the switch still carries no IP."""
     cfg = _render(
         "switch_auto.j2",
         hostname=hostname, uplink=uplink, router_hostname=router_hostname,
         vlan_id=vlan_id, vlan_name=vlan_name, network=network, access_range=access_range,
+        ssh_username=ssh_username, ssh_password=ssh_password, ssh_secret=ssh_secret,
     )
     return _clean(cfg)
 
@@ -192,9 +197,13 @@ def generate_switch_config(
     access_ports: list[dict] | None = None,
     trunk_encap_needed: bool = False,
     router_hostname: str = "R1",
+    ssh_username: str | None = None,
+    ssh_password: str | None = None,
+    ssh_secret: str | None = None,
 ) -> str:
     """Pure Layer-2 switch config: hostname, STP, VLAN db, trunk uplink, access
-    ports. The switch is never given an IP address by this platform."""
+    ports. The switch is never given an IP address by this platform; an SSH
+    management block is emitted only when credentials are set."""
     vlans = [{"vlan_id": d.vlan_id, "name": d.name.replace(" ", "_")} for d in plan.departments]
     allowed = ",".join(str(d.vlan_id) for d in plan.departments) or "1"
     cfg = _render(
@@ -206,6 +215,7 @@ def generate_switch_config(
         access_ports=_group_access_ports(access_ports or []),
         trunk_encap_needed=trunk_encap_needed,
         router_hostname=router_hostname,
+        ssh_username=ssh_username, ssh_password=ssh_password, ssh_secret=ssh_secret,
     )
     return _clean(cfg)
 
@@ -220,6 +230,9 @@ def generate_manual_config(
     dhcp_pools: list[dict],
     ospf: dict | None = None,
     bgp: dict | None = None,
+    ssh_username: str | None = None,
+    ssh_password: str | None = None,
+    ssh_secret: str | None = None,
 ) -> str:
     parts: list[str] = []
     if hostname:
@@ -232,6 +245,11 @@ def generate_manual_config(
         parts.append(_render("dhcp.j2", pools=dhcp_pools))
     if (ospf and ospf.get("networks")) or (bgp and (bgp.get("networks") or bgp.get("neighbors"))):
         parts.append(_render("routing_manual.j2", ospf=ospf, bgp=bgp))
+    if ssh_username:
+        parts.append(_render(
+            "_ssh.j2",
+            ssh_username=ssh_username, ssh_password=ssh_password, ssh_secret=ssh_secret,
+        ))
     if not parts:
         return "! (nothing to configure)\n"
     return _clean("\n".join(parts))

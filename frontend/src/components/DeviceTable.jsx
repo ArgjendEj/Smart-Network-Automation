@@ -1,5 +1,13 @@
 const icon = { router: '🔀', switch: '🔗', pc: '💻', ip_phone: '📞', printer: '🖨️', server: '🗄️' }
-const roleColor = { lan: 'var(--green)', link: 'var(--amber)', mgmt: 'var(--accent)', iface: 'var(--muted)' }
+const typeLabel = { router: 'Router', switch: 'Switch', pc: 'PC', ip_phone: 'IP Phone', printer: 'Printer', server: 'Server' }
+
+// router-to-router link -> orange ; an endpoint's own address -> blue ;
+// everything else (a router's LAN gateway / management IP) -> green
+function ipColor(device, role) {
+  if (role === 'link') return 'var(--amber)'
+  if (['pc', 'ip_phone', 'printer', 'server'].includes(device.device_type)) return 'var(--accent)'
+  return 'var(--green)'
+}
 
 function IpList({ device }) {
   const ips = device.ip_addresses || []
@@ -12,7 +20,7 @@ function IpList({ device }) {
     <div className="grid" style={{ gap: 2 }}>
       {ips.map((x, i) => (
         <div key={i} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-          <span style={{ color: roleColor[x.role] || 'var(--text)', fontWeight: 600 }}>{x.ip}</span>
+          <span style={{ color: ipColor(device, x.role), fontWeight: 600 }}>{x.ip}</span>
           {x.interface !== 'mgmt' && <span className="muted"> · {x.interface}</span>}
           {x.role === 'link' && <span className="muted"> (to peer)</span>}
         </div>
@@ -38,7 +46,7 @@ export default function DeviceTable({ devices, onEdit, onDelete, onPing, onConfi
           <tr key={d.id}>
             <td><strong>{d.name}</strong> <span className="muted">/ {d.hostname}</span></td>
             <td>
-              {icon[d.device_type]} {d.device_type === 'ip_phone' ? 'ip phone' : d.device_type}
+              {icon[d.device_type]} {typeLabel[d.device_type] || d.device_type}
               {d.device_type === 'server' && d.services && (
                 <div className="muted" style={{ fontSize: 11 }}>{d.services.split(',').join(' · ')}</div>
               )}

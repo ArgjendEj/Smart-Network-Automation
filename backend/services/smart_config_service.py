@@ -28,7 +28,7 @@ ACCESS_PORT_LAST = 22  # leave Fa0/23-24 + Gi0/1-2 free for uplinks
 # pool of router interfaces the auto-configurator is allowed to assign to links
 ROUTER_IFACE_POOL = [
     "GigabitEthernet0/0", "GigabitEthernet0/1", "GigabitEthernet0/2",
-    "GigabitEthernet0/3", "Serial0/0/0", "Serial0/0/1",
+    "GigabitEthernet0/3", "GigabitEthernet0/4", "GigabitEthernet0/5",
 ]
 TRANSIT_POOL = "10.0.0.0/8"  # carved into /30s for router<->router links
 
@@ -246,24 +246,31 @@ def _free_interface(db: Session, device_id: int, iface: str, keep_conn_id: int |
 
 
 def _sync_connection(
-    db: Session, a: Device, a_if: str, b: Device, b_if: str, link_type: str = "p2p"
+    db: Session, a: Device, a_if: str, b: Device, b_if: str, link_type: str = "p2p",
+    conn_id: int | None = None,
 ) -> None:
-    # dedupe: legacy/duplicate rows for the same device pair can accumulate
-    # (re-running auto-config, manual re-cabling, etc.) - keep only the oldest
-    dupes = (
-        db.query(Connection)
-        .filter(
-            ((Connection.a_device_id == a.id) & (Connection.b_device_id == b.id))
-            | ((Connection.a_device_id == b.id) & (Connection.b_device_id == a.id))
+    if conn_id is not None:
+        # the caller already knows exactly which cable this is (it may be one
+        # of SEVERAL links between the same two devices, e.g. two router-to-
+        # router links) - update that row only, never collapse it with a sibling
+        conn = db.get(Connection, conn_id)
+    else:
+        # dedupe: legacy/duplicate rows for the same device pair can accumulate
+        # (re-running auto-config, manual re-cabling, etc.) - keep only the oldest
+        dupes = (
+            db.query(Connection)
+            .filter(
+                ((Connection.a_device_id == a.id) & (Connection.b_device_id == b.id))
+                | ((Connection.a_device_id == b.id) & (Connection.b_device_id == a.id))
+            )
+            .order_by(Connection.id)
+            .all()
         )
-        .order_by(Connection.id)
-        .all()
-    )
-    conn = dupes[0] if dupes else None
-    if len(dupes) > 1:
-        for extra in dupes[1:]:
-            db.delete(extra)
-        db.flush()   # apply the deletes before anything else touches this pair
+        conn = dupes[0] if dupes else None
+        if len(dupes) > 1:
+            for extra in dupes[1:]:
+                db.delete(extra)
+            db.flush()   # apply the deletes before anything else touches this pair
 
     keep_id = conn.id if conn else None
     _free_interface(db, a.id, a_if, keep_id)

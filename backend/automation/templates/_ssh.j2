@@ -1,0 +1,12 @@
+{% if ssh_username %}
+ip domain-name lab.local
+crypto key generate rsa modulus 1024
+username {{ ssh_username }} privilege 15 secret {{ ssh_password }}
+{% if ssh_secret %}
+enable secret {{ ssh_secret }}
+{% endif %}
+line vty 0 15
+ transport input ssh
+ login local
+!
+{% endif %}

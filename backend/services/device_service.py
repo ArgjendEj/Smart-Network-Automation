@@ -94,7 +94,9 @@ def get_device(db: Session, device_id: int) -> Device | None:
     return db.get(Device, device_id)
 
 
-_SWITCH_CLEARED = ("mgmt_ip", "ssh_username", "ssh_password", "ssh_secret")
+# a switch never carries an IP, but it may keep SSH credentials so the generated
+# config can show the SSH management block (username / vty / login local)
+_SWITCH_CLEARED = ("mgmt_ip",)
 
 
 def _enforce_switch_l2(device: Device) -> None:

@@ -1,0 +1,34 @@
+!
+! ===== ROUTER : R1 (auto-generated from topology) =====
+!
+hostname R1
+!
+no ip domain-lookup
+ip domain-name lab.local
+service password-encryption
+!
+ip routing
+!
+ip dhcp excluded-address 192.168.10.1 192.168.10.2
+!
+ip dhcp pool LAN_GigabitEthernet0_0
+ network 192.168.10.0 255.255.255.0
+ default-router 192.168.10.2
+ dns-server 8.8.8.8
+!
+interface GigabitEthernet0/0
+ description ### LAN 192.168.10.0/24 ###
+ ip address 192.168.10.2 255.255.255.0
+ no shutdown
+!
+router ospf 1
+ router-id 1.1.1.1
+ passive-interface GigabitEthernet0/0
+ network 192.168.10.0 0.0.0.255 area 0
+!
+banner motd ^C Authorized access only - R1 ^C
+!
+line con 0
+ logging synchronous
+!
+end

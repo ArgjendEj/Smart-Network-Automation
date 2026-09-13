@@ -110,6 +110,40 @@ def test_manual_config_run():
     assert "switchport access vlan 30" in r.json()["config"]
 
 
+def test_switch_gets_ssh_block_but_no_ip():
+    h = _auth()
+    sw = client.post(
+        "/api/devices",
+        json={
+            "name": "SWSSH", "hostname": "SWSSH", "device_type": "switch",
+            "mgmt_ip": "10.9.9.9", "ssh_username": "netadmin",
+            "ssh_password": "cisco123", "ssh_secret": "en123",
+        },
+        headers=h,
+    ).json()
+    # switch never keeps an IP...
+    assert sw["mgmt_ip"] is None
+    # ...but the SSH credentials are kept
+    assert sw["ssh_username"] == "netadmin"
+
+    r = client.post(
+        "/api/manual-config/run",
+        json={
+            "device_id": sw["id"],
+            "vlans": [{"vlan_id": 20, "name": "DATA"}],
+            "deploy": False,
+        },
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    cfg = r.json()["config"]
+    assert "username netadmin privilege 15 secret cisco123" in cfg
+    assert "transport input ssh" in cfg
+    assert "login local" in cfg
+    assert "ip address" not in cfg
+    assert "interface vlan" not in cfg.lower()
+
+
 def test_manual_config_ospf_and_bgp_on_router():
     h = _auth()
     router = next(d for d in client.get("/api/devices", headers=h).json() if d["device_type"] == "router")
@@ -428,6 +462,197 @@ def test_server_dhcp_role_makes_routers_relay():
     r1cfg = next(x["config"] for x in res["results"] if x["device"] == "R1")
     assert f"ip helper-address {srv_ip}" in r1cfg
     assert "ip dhcp pool" not in r1cfg              # no local pool when relaying
+
+
+def test_router_carries_several_hand_typed_lan_gateways():
+    """Admin types 3 LAN gateways on a router; each new switch consumes the next
+    one, the unused ones are kept for the next switch."""
+    h = _auth()
+    rc = client.post(
+        "/api/devices",
+        json={"name": "RLAN", "hostname": "RLAN", "device_type": "router"},
+        headers=h,
+    ).json()
+    client.put(
+        f"/api/devices/{rc['id']}",
+        json={"extra_ips": [
+            {"interface": "GigabitEthernet0/1", "address": "192.168.1.1/24"},
+            {"interface": "GigabitEthernet0/2", "address": "192.168.5.1/24"},
+            {"interface": "GigabitEthernet0/3", "address": "192.168.10.1/24"},
+        ]},
+        headers=h,
+    )
+    sw_a = client.post("/api/devices",
+                       json={"name": "SWA1", "hostname": "SWA1", "device_type": "switch"},
+                       headers=h).json()
+    pc_a = client.post("/api/devices",
+                       json={"name": "PCA1", "hostname": "PCA1", "device_type": "pc"},
+                       headers=h).json()
+    for a, b in [(pc_a["id"], sw_a["id"]), (sw_a["id"], rc["id"])]:
+        client.post("/api/topology/connections",
+                    json={"a_device_id": a, "b_device_id": b, "link_type": "access"}, headers=h)
+    r = client.post("/api/smart-config/auto", json={"scope": "lan"}, headers=h).json()
+    cfg1 = next(x["config"] for x in r["results"] if x["device"] == "RLAN")
+    assert "ip address 192.168.1.1 255.255.255.0" in cfg1
+    pca = next(d["ip"] for d in r["dhcp"] if d["pc"] == "PCA1")
+    assert pca.startswith("192.168.1.")
+
+    # add a second switch -> it must take 192.168.5.1, not a fresh pool subnet
+    sw_b = client.post("/api/devices",
+                       json={"name": "SWA2", "hostname": "SWA2", "device_type": "switch"},
+                       headers=h).json()
+    pc_b = client.post("/api/devices",
+                       json={"name": "PCA2", "hostname": "PCA2", "device_type": "pc"},
+                       headers=h).json()
+    for a, b in [(pc_b["id"], sw_b["id"]), (sw_b["id"], rc["id"])]:
+        client.post("/api/topology/connections",
+                    json={"a_device_id": a, "b_device_id": b, "link_type": "access"}, headers=h)
+    r2 = client.post("/api/smart-config/auto", json={"scope": "lan"}, headers=h).json()
+    cfg2 = next(x["config"] for x in r2["results"] if x["device"] == "RLAN")
+    assert "ip address 192.168.1.1 255.255.255.0" in cfg2
+    assert "ip address 192.168.5.1 255.255.255.0" in cfg2
+    pcb = next(d["ip"] for d in r2["dhcp"] if d["pc"] == "PCA2")
+    assert pcb.startswith("192.168.5.")
+
+    # the third hand-typed gateway is still waiting on the device
+    rlan = next(d for d in client.get("/api/devices", headers=h).json()
+                if d["hostname"] == "RLAN")
+    ips = {a["ip"] for a in rlan["ip_addresses"]}
+    assert "192.168.10.1/24" in ips
+
+
+def test_new_switch_takes_a_hand_typed_gateway_added_later():
+    """A router already has a switch on its first subnet. The admin adds a
+    hand-typed gateway, cables a second switch -> the new switch takes the typed
+    gateway (not a fresh pool subnet), and re-runs stay stable."""
+    h = _auth()
+    rz = client.post("/api/devices",
+                     json={"name": "RZ", "hostname": "RZ", "device_type": "router"},
+                     headers=h).json()
+    sz1 = client.post("/api/devices", json={"name": "SZ1", "hostname": "SZ1", "device_type": "switch"}, headers=h).json()
+    p1 = client.post("/api/devices", json={"name": "PZ1", "hostname": "PZ1", "device_type": "pc"}, headers=h).json()
+    for a, b in [(p1["id"], sz1["id"]), (sz1["id"], rz["id"])]:
+        client.post("/api/topology/connections",
+                    json={"a_device_id": a, "b_device_id": b, "link_type": "access"}, headers=h)
+    r1 = client.post("/api/smart-config/auto", json={"scope": "lan"}, headers=h).json()
+    ip1 = next(d["ip"] for d in r1["dhcp"] if d["pc"] == "PZ1")
+
+    client.put(
+        f"/api/devices/{rz['id']}",
+        json={"extra_ips": [{"interface": "GigabitEthernet0/3", "address": "192.168.55.1/24"}]},
+        headers=h,
+    )
+    sz2 = client.post("/api/devices", json={"name": "SZ2", "hostname": "SZ2", "device_type": "switch"}, headers=h).json()
+    p2 = client.post("/api/devices", json={"name": "PZ2", "hostname": "PZ2", "device_type": "pc"}, headers=h).json()
+    for a, b in [(p2["id"], sz2["id"]), (sz2["id"], rz["id"])]:
+        client.post("/api/topology/connections",
+                    json={"a_device_id": a, "b_device_id": b, "link_type": "access"}, headers=h)
+    r2 = client.post("/api/smart-config/auto", json={"scope": "lan"}, headers=h).json()
+    got2 = {d["pc"]: d["ip"] for d in r2["dhcp"]}
+    assert got2["PZ1"] == ip1                              # first switch unchanged
+    assert got2["PZ2"].startswith("192.168.55."), got2     # new switch takes the typed gw
+    # stable
+    r3 = client.post("/api/smart-config/auto", json={"scope": "lan"}, headers=h).json()
+    got3 = {d["pc"]: d["ip"] for d in r3["dhcp"]}
+    assert got3["PZ1"] == ip1 and got3["PZ2"] == got2["PZ2"]
+
+
+def test_pc_behind_second_switch_joins_that_switchs_subnet():
+    """R1 -> sw_x (hand-typed 192.168.30.1) -> pc; sw_x is also cabled to another
+    uplinked switch. The PC must land on 192.168.30.x, not the other subnet."""
+    h = _auth()
+    rx = client.post("/api/devices",
+                     json={"name": "RX", "hostname": "RX", "device_type": "router",
+                           "mgmt_ip": "192.168.20.1"},
+                     headers=h).json()
+    client.put(
+        f"/api/devices/{rx['id']}",
+        json={"extra_ips": [{"interface": "GigabitEthernet0/2", "address": "192.168.30.1/24"}]},
+        headers=h,
+    )
+    sx = client.post("/api/devices", json={"name": "SX", "hostname": "SX", "device_type": "switch"}, headers=h).json()
+    sy = client.post("/api/devices", json={"name": "SY", "hostname": "SY", "device_type": "switch"}, headers=h).json()
+    pcx = client.post("/api/devices", json={"name": "PCX", "hostname": "PCX", "device_type": "pc"}, headers=h).json()
+    pcy = client.post("/api/devices", json={"name": "PCY", "hostname": "PCY", "device_type": "pc"}, headers=h).json()
+    for a, b in [
+        (sx["id"], rx["id"]),        # SX uplinks to RX on the hand-typed 192.168.30.1
+        (sy["id"], rx["id"]),        # SY uplinks to RX (mgmt 192.168.20.1)
+        (sx["id"], sy["id"]),        # the L2 loop between the two segments
+        (pcx["id"], sx["id"]),
+        (pcy["id"], sy["id"]),
+    ]:
+        client.post("/api/topology/connections",
+                    json={"a_device_id": a, "b_device_id": b, "link_type": "access"}, headers=h)
+    res = client.post("/api/smart-config/auto", json={"scope": "lan"}, headers=h).json()
+    got = {d["pc"]: d["ip"] for d in res["dhcp"]}
+    assert got["PCX"].startswith("192.168.30."), got
+    assert got["PCY"].startswith("192.168.20."), got
+    rxcfg = next(x["config"] for x in res["results"] if x["device"] == "RX")
+    assert "ip address 192.168.30.1 255.255.255.0" in rxcfg
+
+
+def test_router_links_to_several_routers():
+    """One router cabled to 3 routers: each link its own /30 on its own
+    interface, and a hand-typed 10.x IP is honoured."""
+    h = _auth()
+    hub = client.post("/api/devices",
+                      json={"name": "HUB", "hostname": "HUB", "device_type": "router"},
+                      headers=h).json()
+    client.put(
+        f"/api/devices/{hub['id']}",
+        json={"extra_ips": [{"interface": "GigabitEthernet0/5", "address": "10.7.7.1/30"}]},
+        headers=h,
+    )
+    spokes = [
+        client.post("/api/devices",
+                    json={"name": f"SPK{i}", "hostname": f"SPK{i}", "device_type": "router"},
+                    headers=h).json()
+        for i in range(3)
+    ]
+    for s in spokes:
+        client.post("/api/topology/connections",
+                    json={"a_device_id": hub["id"], "b_device_id": s["id"], "link_type": "access"},
+                    headers=h)
+    r = client.post("/api/smart-config/auto", json={"scope": "wan"}, headers=h).json()
+    hubcfg = next(x["config"] for x in r["results"] if x["device"] == "HUB")
+    link_lines = [ln.strip() for ln in hubcfg.splitlines()
+                  if ln.strip().startswith("ip address") and " 10." in ln]
+    assert len(link_lines) == 3                         # three distinct links
+    assert all(ln.endswith("255.255.255.252") for ln in link_lines)   # all /30
+    assert "ip address 10.7.7.1 255.255.255.252" in hubcfg            # typed IP kept
+    nets = {ln.split()[2] for ln in link_lines}
+    assert len(nets) == 3                               # no address reused
+
+
+def test_two_links_between_the_same_pair_of_routers():
+    """R1 <-> R2 cabled twice (redundant / load-sharing links): both must get
+    their own interface + /30, and re-running keeps both stable."""
+    h = _auth()
+    ra = client.post("/api/devices", json={"name": "RA", "hostname": "RA", "device_type": "router"}, headers=h).json()
+    rb = client.post("/api/devices", json={"name": "RB2", "hostname": "RB2", "device_type": "router"}, headers=h).json()
+    for _ in range(2):
+        c = client.post("/api/topology/connections",
+                        json={"a_device_id": ra["id"], "b_device_id": rb["id"], "link_type": "access"},
+                        headers=h)
+        assert c.status_code == 201, c.text
+
+    r1 = client.post("/api/smart-config/auto", json={"scope": "wan"}, headers=h).json()
+    racfg = next(x["config"] for x in r1["results"] if x["device"] == "RA")
+    link_lines = [ln.strip() for ln in racfg.splitlines()
+                  if ln.strip().startswith("ip address") and " 10." in ln]
+    assert len(link_lines) == 2, racfg                 # both cables became real links
+    ips = {ln.split()[2] for ln in link_lines}
+    assert len(ips) == 2                               # on two distinct /30s
+
+    graph = client.get("/api/topology", headers=h).json()
+    ra_rb_edges = [e for e in graph["edges"]
+                   if {e["source"], e["target"]} == {ra["id"], rb["id"]}]
+    assert len(ra_rb_edges) == 2                       # neither cable got merged away
+
+    # a second run must not collapse or move either link
+    r2 = client.post("/api/smart-config/auto", json={"scope": "wan"}, headers=h).json()
+    racfg2 = next(x["config"] for x in r2["results"] if x["device"] == "RA")
+    assert racfg2 == racfg
 
 
 def test_topology_graph_and_link():

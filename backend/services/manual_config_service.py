@@ -104,6 +104,9 @@ def run(db: Session, payload: ManualConfigIn) -> ConfigResult:
         dhcp_pools=[] if device.device_type == "switch" else [d.model_dump() for d in payload.dhcp],
         ospf=payload.ospf.model_dump() if payload.ospf else None,
         bgp=payload.bgp.model_dump() if payload.bgp else None,
+        ssh_username=device.ssh_username,
+        ssh_password=device.ssh_password,
+        ssh_secret=device.ssh_secret,
     )
     _persist(db, device, payload, ifaces)
     device.last_config = config

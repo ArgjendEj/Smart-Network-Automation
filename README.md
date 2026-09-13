@@ -1,5 +1,7 @@
 # Smart Network Automation & Configuration Management Platform — MVP
 
+**🇬🇧 English** · [🇦🇱 Shqip](README.sq.md)
+
 A web platform that **manages a Cisco network topology, generates Cisco IOS
 configuration automatically, and deploys it over SSH** — built for the master's
 thesis with **Python / FastAPI, React, Jinja2, Netmiko and Ansible**.
@@ -32,9 +34,9 @@ work.
 
 | Module | Scope |
 |---|---|
-| **Authentication** | Sign in / **Sign up** (self-registration) / logout · JWT · `admin` role |
+| **Authentication** | Sign in / **Sign up** (self-registration, only reachable from the sign-in page) / logout · JWT · `admin` role · show/hide-password toggle |
 | **Device Management** | Add / edit / delete / list · 6 device types (Router, Switch, PC, IP Phone, Printer, Server) · per-interface IP entry · server roles · SSH reachability check |
-| **Network Topology** | React Flow canvas: drag & drop, cable devices port-to-port, delete links, live online/offline status |
+| **Network Topology** | React Flow canvas: drag & drop, cable devices port-to-port (a cable auto-routes to whichever side faces the other device), delete links, live online/offline status, colour-coded IPs (green = LAN/management, orange = router-to-router, blue = an endpoint's own address) |
 | **Smart Auto Configuration** | One click, no forms: reads the topology and generates subnets → VLANs → gateways → DHCP → routing (OSPF / BGP / both) → optional NAT → Cisco IOS → Ansible artifacts → optional SSH deploy → DB |
 | **Manual Configuration** | Router/switch only: hostname, interfaces, IP/mask, VLANs (switch only), DHCP pools, **OSPF**, **BGP** → Cisco IOS + optional SSH deploy |
 | **Dashboard** | Device counts by type, online/offline, VLAN count, recent deploys |
@@ -51,8 +53,9 @@ These are the rules the configuration engine follows (built up over the thesis
 work):
 
 **Devices**
-- A **switch is pure Layer 2** — it never receives an IP, management IP or SSH
-  credentials. Only routers are deployed to over SSH.
+- A **switch is pure Layer 2** — it never receives an IP or management IP. It may
+  keep SSH credentials so the generated config shows the SSH management block
+  (`username`, `line vty`, `transport input ssh`, `login local`) — no IP is added.
 - **PC / IP Phone / Printer / Server** are endpoints. PC, phone and printer get
   their address by DHCP; a **server keeps a static low address** and its roles
   are wired into the router.
@@ -61,19 +64,34 @@ work):
   DHCP → the router becomes a relay (`ip helper-address`) instead of hosting the
   pool.
 - A device shows **online** as soon as it is cabled in the topology.
+- A router's physical ports are all **GigabitEthernet0/0 – 0/5** (6 in total,
+  3 drawn on top / 3 on the bottom of the topology node) — no Serial ports.
 
 **Addressing**
 - **Local networks** use Class C — `192.168.1.0/24 … 192.168.255.0/24`.
 - **Router-to-router links** use Class A — `10.0.0.0/8`, always a **/30
-  (255.255.255.252)**, `.1` / `.2`.
+  (255.255.255.252)**, `.1` / `.2`. A router can have **several links to the
+  same peer router** (redundant / load-sharing) — each gets its own interface
+  and its own /30, and re-running never merges or moves them.
 - If the admin typed a Management IP on a router, that IP is kept as the **LAN
   gateway**; a typed `10.x` IP is used verbatim on the router-to-router link
   (peer takes the other /30 address).
+- A router can carry **several hand-typed LAN gateways** at once (`Devices →
+  Edit → Interface IP addresses`) — each switch cabled to it consumes the next
+  unused one, in order; the rest wait untouched for the next switch instead of
+  being deleted.
+- Every PC/phone/printer/server joins the segment of the **nearest switch that
+  has a router uplink**, even when two uplinked switches are also cabled to
+  each other (an L2 loop) — so a host never ends up on the wrong subnet just
+  because its switch has a second path back to the router.
 - **DHCP is sequential and stable**: PCs get `.2, .3, .4 …` in hostname order;
   re-running after an IP change re-numbers cleanly with no stale leases.
 - **VLAN id scheme**: `192.168.X.0/24` → VLAN `X × 10` (deterministic, globally
   unique across the whole topology), so the id matches on the router, the switch
   and DHCP.
+- Stray/duplicate cables (leftovers from re-cabling) are cleaned up
+  automatically — except a genuine second link between two routers, which is
+  never treated as a duplicate.
 
 **Configuration**
 - **VLANs live only on the switch** — the router config never emits `vlan` or
@@ -254,7 +272,7 @@ the only valid ping sources/targets.
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q        # unit + API tests (26)
+.\.venv\Scripts\python.exe -m pytest -q        # unit + API tests (32)
 
 cd ..
 backend\.venv\Scripts\python.exe tests\compare_manual_vs_auto.py
@@ -311,7 +329,8 @@ backend/
 frontend/
   src/pages/              Login, Register, Dashboard, Topology, Devices,
                           SmartConfiguration, ManualConfiguration, Logs
-  src/components/         DeviceForm, DeviceTable, DeviceNode, PingTest, …
+  src/components/         DeviceForm, DeviceTable, DeviceNode, PingTest,
+                          PasswordInput, …
   src/context/AuthContext.jsx    src/services/api.js
 
 tests/compare_manual_vs_auto.py   thesis experiment

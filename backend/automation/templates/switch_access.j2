@@ -30,6 +30,7 @@ interface range {{ a.range }}
  no shutdown
 !
 {% endfor %}
+{% include "_ssh.j2" %}
 banner motd ^C Authorized access only - {{ hostname }} ^C
 !
 line con 0

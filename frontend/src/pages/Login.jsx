@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
+import PasswordInput from '../components/PasswordInput'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
@@ -41,7 +42,8 @@ export default function Login() {
         </div>
         <div className="field">
           <label className="muted">Password</label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password" />
         </div>
         {err && <div className="error" style={{ marginBottom: 10 }}>{err}</div>}
         <button className="primary" style={{ width: '100%' }} disabled={busy}>

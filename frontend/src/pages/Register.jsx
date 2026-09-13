@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import PasswordInput from '../components/PasswordInput'
 import { useAuth } from '../context/AuthContext'
 
 export default function Register() {
@@ -52,11 +53,13 @@ export default function Register() {
         </div>
         <div className="field">
           <label className="muted">Password</label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password" />
         </div>
         <div className="field">
           <label className="muted">Confirm password</label>
-          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+          <PasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)}
+            autoComplete="new-password" />
         </div>
         {err && <div className="error" style={{ marginBottom: 10 }}>{err}</div>}
         <button className="primary" style={{ width: '100%' }} disabled={busy}>
