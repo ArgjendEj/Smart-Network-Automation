@@ -15,17 +15,18 @@ export default function ConnectionLine({
       <BaseEdge
         id={id} path={path} markerEnd={markerEnd} interactionWidth={24}
         style={{
-          stroke: selected ? '#ef4444' : trunk ? '#f59e0b' : '#38bdf8',
+          stroke: selected ? 'var(--red)' : trunk ? 'var(--cable-trunk)' : 'var(--cable-access)',
           strokeWidth: selected ? 3 : 2,
         }}
       />
       <EdgeLabelRenderer>
         <div
+          className="cable-label"
           style={{
             position: 'absolute',
             transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`,
-            background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
-            fontSize: 10, padding: '1px 6px', color: '#e2e8f0', pointerEvents: 'all',
+            background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6,
+            fontSize: 10, padding: '1px 6px', color: 'var(--text)', pointerEvents: 'all',
             display: 'flex', alignItems: 'center', gap: 4,
           }}
         >
@@ -34,8 +35,8 @@ export default function ConnectionLine({
             title="Delete cable"
             onClick={(e) => { e.stopPropagation(); data?.onDelete?.(id) }}
             style={{
-              padding: '0 4px', fontSize: 11, lineHeight: 1.4, border: '1px solid #ef4444',
-              background: 'transparent', color: '#ef4444', borderRadius: 4, cursor: 'pointer',
+              padding: '0 4px', fontSize: 11, lineHeight: 1.4, border: '1px solid var(--red)',
+              background: 'transparent', color: 'var(--red)', borderRadius: 4, cursor: 'pointer',
             }}
           >
             ✕

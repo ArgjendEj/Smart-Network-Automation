@@ -11,7 +11,13 @@ from models import Connection, Device, Interface, Routing, Vlan
 from schemas import DeviceCreate, DeviceUpdate, ExtraIp
 from services.deployment_service import tcp_ping
 
-MANUAL_DESC = "manual"
+MANUAL_DESC = "manual"                 # IP typed under Devices -> Edit
+MANUAL_CONFIG_DESC = "manual config"   # interface set on the Manual Configuration page
+
+
+def is_hand_typed(description: str | None) -> bool:
+    """Interfaces Smart Auto must keep exactly as the admin typed them."""
+    return (description or "").lower() in (MANUAL_DESC, MANUAL_CONFIG_DESC)
 
 
 def _prefix(mask: str | None) -> str:
@@ -38,45 +44,81 @@ def _parse_address(text: str) -> tuple[str, str]:
     return text, "255.255.255.0"
 
 
+def check_host_address(ip: str, mask: str) -> None:
+    """Refuse a subnet's own network / broadcast address - IOS does too."""
+    net = ipaddress.ip_network(f"{ip}/{mask}", strict=False)
+    if net.prefixlen >= 31:
+        return
+    kind = {net.network_address: "network", net.broadcast_address: "broadcast"}.get(ipaddress.ip_address(ip))
+    if kind:
+        raise ValueError(f"{ip}/{net.prefixlen} is a {kind} address, a device cannot use it. "
+                         f"Use {net.network_address + 1} - {net.broadcast_address - 1}.")
+
+
 def _apply_extra_ips(db: Session, device: Device, extras: list[ExtraIp]) -> None:
-    """Replace the device's hand-entered interface IPs with `extras`."""
-    db.query(Interface).filter(
-        Interface.device_id == device.id, Interface.description == MANUAL_DESC
-    ).delete()
+    """Make the router's interface IPs match `extras` - the full list shown under
+    Devices -> Edit. An interface Smart Auto created stays automatic while its
+    address is left as it was; one the admin changes or adds becomes hand-typed;
+    one removed from the list is deleted."""
+    current = {i.name: i for i in db.query(Interface).filter(
+        Interface.device_id == device.id, Interface.ip_address.isnot(None)).all()}
+    wanted: dict[str, tuple[str, str]] = {}
     for e in extras:
         if not e.interface.strip() or not e.address.strip():
             continue
         try:
-            ip, mask = _parse_address(e.address)
+            wanted[e.interface.strip()] = _parse_address(e.address)
         except ValueError:
             raise ValueError(f"'{e.address}' is not a valid IP address.")
-        row = (
-            db.query(Interface)
-            .filter(Interface.device_id == device.id, Interface.name == e.interface.strip())
-            .first()
-        )
-        if row is not None:      # an auto-generated interface already uses this name
-            row.ip_address, row.subnet_mask, row.description = ip, mask, MANUAL_DESC
+
+    for name, row in current.items():
+        if name not in wanted:
+            db.delete(row)
+    db.flush()
+
+    for name, (ip, mask) in wanted.items():
+        row = current.get(name) or db.query(Interface).filter(
+            Interface.device_id == device.id, Interface.name == name).first()
+        if row is not None and (row.ip_address, row.subnet_mask) == (ip, mask):
+            continue             # untouched - keep it exactly as it is
+        check_host_address(ip, mask)
+        # an interface first set on the Manual Configuration page keeps that marker
+        marker = (MANUAL_CONFIG_DESC if row is not None
+                  and (row.description or "").lower() == MANUAL_CONFIG_DESC else MANUAL_DESC)
+        if row is not None:
+            row.ip_address, row.subnet_mask, row.description = ip, mask, marker
         else:
             db.add(Interface(
-                device_id=device.id, name=e.interface.strip(), ip_address=ip,
-                subnet_mask=mask, mode="routed", description=MANUAL_DESC, enabled=True,
+                device_id=device.id, name=name, ip_address=ip,
+                subnet_mask=mask, mode="routed", description=marker, enabled=True,
             ))
 
 
 def attach_ips(db: Session, devices: list[Device]) -> list[Device]:
     """Populate each device's `ip_addresses` (interface IPs + mgmt) for the API."""
+    # interfaces whose cable is one of several between the same two devices
+    conns = db.query(Connection).all()
+    per_pair: dict[frozenset, int] = {}
+    for c in conns:
+        key = frozenset({c.a_device_id, c.b_device_id})
+        per_pair[key] = per_pair.get(key, 0) + 1
+    parallel = set()
+    for c in conns:
+        if per_pair[frozenset({c.a_device_id, c.b_device_id})] > 1:
+            parallel |= {(c.a_device_id, c.a_interface), (c.b_device_id, c.b_interface)}
+
     ifaces: dict[int, list[dict]] = {}
     for i in db.query(Interface).filter(Interface.ip_address.isnot(None)).all():
         desc = (i.description or "").lower()
         role = ("lan" if desc.startswith("lan")
                 else "link" if desc.startswith(("link", "point-to-point"))
-                else "manual" if desc == MANUAL_DESC
+                else "manual" if is_hand_typed(desc)
                 else "iface")
         ifaces.setdefault(i.device_id, []).append({
             "interface": i.name,
             "ip": f"{i.ip_address}{_prefix(i.subnet_mask)}",
             "role": role,
+            "parallel": (i.device_id, i.name) in parallel,
         })
     for d in devices:
         rows = list(ifaces.get(d.id, []))
@@ -133,7 +175,7 @@ def update_device(db: Session, device: Device, data: DeviceUpdate) -> Device:
         # auto-generated interfaces were derived from the old address - drop them
         # so nothing stale is shown; hand-entered ("manual") ones are kept
         for i in db.query(Interface).filter(Interface.device_id == device.id).all():
-            if (i.description or "").lower() != MANUAL_DESC:
+            if not is_hand_typed(i.description):
                 db.delete(i)
         db.query(Routing).filter(Routing.device_id == device.id).delete()
         db.query(Vlan).filter(Vlan.device_id == device.id).delete()

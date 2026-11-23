@@ -173,6 +173,7 @@ def generate_auto_switch_config(
     vlan_name: str | None = None,
     network: str | None = None,
     access_range: str = "FastEthernet0/1-24",
+    extra_ports: list[tuple[str, bool]] | None = None,   # (port, is a host)
     ssh_username: str | None = None,
     ssh_password: str | None = None,
     ssh_secret: str | None = None,
@@ -185,6 +186,7 @@ def generate_auto_switch_config(
         "switch_auto.j2",
         hostname=hostname, uplink=uplink, router_hostname=router_hostname,
         vlan_id=vlan_id, vlan_name=vlan_name, network=network, access_range=access_range,
+        extra_ports=extra_ports or [],
         ssh_username=ssh_username, ssh_password=ssh_password, ssh_secret=ssh_secret,
     )
     return _clean(cfg)

@@ -142,8 +142,8 @@ export default function ManualConfigurationForm({ devices, onSubmit }) {
         {dhcp.map((x, i) => (
           <div className="row" key={i} style={{ marginTop: 8 }}>
             <input placeholder="pool name" value={x.pool_name} onChange={(e) => updDhcp(i, 'pool_name', e.target.value)} />
-            <input placeholder="network 10.10.1.0" value={x.network} onChange={(e) => updDhcp(i, 'network', e.target.value)} />
-            <input placeholder="netmask" style={{ width: 130 }} value={x.netmask} onChange={(e) => updDhcp(i, 'netmask', e.target.value)} />
+            <input placeholder="network 192.168.1.0" value={x.network} onChange={(e) => updDhcp(i, 'network', e.target.value)} />
+            <input placeholder="Mask" style={{ width: 130 }} value={x.netmask} onChange={(e) => updDhcp(i, 'netmask', e.target.value)} />
             <input placeholder="gateway" style={{ width: 120 }} value={x.default_gateway} onChange={(e) => updDhcp(i, 'default_gateway', e.target.value)} />
             <input placeholder="dns" style={{ width: 110 }} value={x.dns} onChange={(e) => updDhcp(i, 'dns', e.target.value)} />
             <button type="button" onClick={() => setDhcp(dhcp.filter((_, j) => j !== i))}>✕</button>
@@ -195,7 +195,7 @@ export default function ManualConfigurationForm({ devices, onSubmit }) {
             {bgp.networks.map((n, i) => (
               <div className="row" key={i}>
                 <input placeholder="network 192.168.1.0" value={n.network} onChange={(e) => updBgpNet(i, 'network', e.target.value)} />
-                <input placeholder="mask" style={{ width: 140 }} value={n.mask} onChange={(e) => updBgpNet(i, 'mask', e.target.value)} />
+                <input placeholder="Mask" style={{ width: 140 }} value={n.mask} onChange={(e) => updBgpNet(i, 'mask', e.target.value)} />
                 <button type="button" onClick={() => setBgp({ ...bgp, networks: bgp.networks.filter((_, j) => j !== i) })}>✕</button>
               </div>
             ))}

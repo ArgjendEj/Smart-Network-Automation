@@ -5,6 +5,8 @@ const api = axios.create({ baseURL: '/api' })
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) config.headers.Authorization = `Bearer ${token}`
+  // tells the backend this is a current UI build (see evict_stale_ui in main.py)
+  config.headers['X-UI-Build'] = '1'
   return config
 })
 
@@ -48,6 +50,7 @@ export const DeviceAPI = {
 
 export const TopologyAPI = {
   graph: () => api.get('/topology'),
+  deviceInfo: (id) => api.get(`/topology/devices/${id}/info`),
   addLink: (d) => api.post('/topology/connections', d),
   removeLink: (id) => api.delete(`/topology/connections/${id}`),
   move: (id, x, y) => api.patch(`/topology/devices/${id}/position`, { x, y }),
@@ -56,8 +59,8 @@ export const TopologyAPI = {
 export const SmartAPI = {
   preview: (d) => api.post('/smart-config/preview', d),
   run: (d) => api.post('/smart-config/run', d),
-  auto: (scope = 'all', routing = 'ospf', nat = false) =>
-    api.post('/smart-config/auto', { scope, routing, nat }),
+  auto: (scope = 'all', routing = 'ospf', nat = false, overwriteManual = false) =>
+    api.post('/smart-config/auto', { scope, routing, nat, overwrite_manual: overwriteManual }),
 }
 
 export const ManualAPI = {
@@ -66,6 +69,8 @@ export const ManualAPI = {
 
 export const MonitoringAPI = {
   ping: (d) => api.post('/monitoring/ping', d),
+  packet: (source_device_id, target_device_id) =>
+    api.post('/monitoring/packet', { source_device_id, target_device_id }),
   endpoints: () => api.get('/monitoring/endpoints'),
 }
 

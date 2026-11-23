@@ -62,6 +62,7 @@ class AutoIn(BaseModel):
     scope: Literal["all", "lan", "wan"] = "all"
     routing: Literal["ospf", "bgp", "both"] = "ospf"
     nat: bool = False
+    overwrite_manual: bool = False
 
 
 @router.post("/auto")
@@ -71,9 +72,10 @@ def auto(payload: AutoIn | None = None, db: Session = Depends(get_db)):
     routing='bgp' -> eBGP between routers instead of OSPF.
     nat=True -> NAT overload (PAT) on each router: its LANs as inside, its first
     router-to-router link as outside.
+    overwrite_manual=True -> hand-typed router interfaces are replaced by Smart Auto.
     """
     p = payload or AutoIn()
     try:
-        return auto_topology_service.run(db, p.scope, p.routing, p.nat)
+        return auto_topology_service.run(db, p.scope, p.routing, p.nat, p.overwrite_manual)
     except ValueError as exc:
         raise HTTPException(400, str(exc))

@@ -73,6 +73,7 @@ class DeviceIp(BaseModel):
     interface: str
     ip: str            # e.g. 192.168.10.1/24
     role: str          # lan | link | mgmt
+    parallel: bool = False   # its cable is one of 2+ between the same two devices
 
 
 class DeviceOut(DeviceBase):

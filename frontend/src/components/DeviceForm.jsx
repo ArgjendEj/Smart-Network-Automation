@@ -15,10 +15,12 @@ export default function DeviceForm({ initial, onSave, onCancel }) {
 
   useEffect(() => {
     setForm({ ...EMPTY, ...(initial || {}) })
-    const manual = (initial?.ip_addresses || [])
-      .filter((x) => x.role === 'manual')
+    // every interface IP of the device (auto-created ones too); the management
+    // IP has its own field above
+    const all = (initial?.ip_addresses || [])
+      .filter((x) => x.role !== 'mgmt')
       .map((x) => ({ interface: x.interface, address: x.ip }))
-    setIps(manual)
+    setIps(all)
   }, [initial])
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
@@ -130,7 +132,7 @@ export default function DeviceForm({ initial, onSave, onCancel }) {
             <div className="row" key={i} style={{ marginTop: 8 }}>
               <input placeholder="GigabitEthernet0/1" style={{ width: 190 }}
                 value={x.interface} onChange={(e) => setIp(i, 'interface', e.target.value)} />
-              <input placeholder="192.168.0.0  or  10.0.0.0" style={{ width: 210 }}
+              <input placeholder="192.168.1.1/24  or  10.0.0.1/30" style={{ width: 210 }}
                 value={x.address} onChange={(e) => setIp(i, 'address', e.target.value)} />
               <button type="button" onClick={() => setIps(ips.filter((_, j) => j !== i))}>✕</button>
             </div>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import PasswordInput from '../components/PasswordInput'
+import ThemeToggle from '../components/ThemeToggle'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
@@ -34,6 +35,7 @@ export default function Login() {
 
   return (
     <div className="login-wrap">
+      <ThemeToggle style={{ position: 'fixed', top: 16, right: 16 }} />
       <form className="card login-card" onSubmit={submit}>
         <h2 style={{ marginTop: 0 }}>⚡ Sign in</h2>
         <div className="field">

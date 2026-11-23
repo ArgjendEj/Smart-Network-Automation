@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import ReactFlow, {
-  Background, Controls, MiniMap, addEdge, useEdgesState, useNodesState,
+  Background, Controls, MiniMap, Panel, addEdge, useEdgesState, useNodesState,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { TopologyAPI } from '../services/api'
 import ConnectionLine from './ConnectionLine'
 import DeviceNode, { PORTS } from './DeviceNode'
+import { useDeviceTooltip } from './DeviceTooltip'
+import PacketEnvelope from './PacketEnvelope'
 
 function toNode(n) {
   return {
@@ -52,13 +55,20 @@ function toEdge(e, nodeById) {
   }
 }
 
-export default function TopologyCanvas({ onGraphChange }) {
+/** picking/onPick: clicks choose packet-test devices; trip/onTripDone: the
+ *  envelope to animate; notice: text shown on top of the map. */
+export default function TopologyCanvas({
+  onGraphChange, picking = false, onPick, trip, onTripDone, notice, showInterfaces = true,
+}) {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const edgeTypes = useMemo(() => ({ connection: ConnectionLine }), [])
   const nodeTypes = useMemo(() => ({ device: DeviceNode }), [])
 
+  const { handlers: hoverHandlers, tooltip } = useDeviceTooltip(picking)
+  const navigate = useNavigate()
   const reloadRef = useRef(null)
+  const typeById = useRef(new Map())   // device id -> device type, for new cables
 
   const removeById = useCallback(async (edgeId, meta = {}) => {
     const a = meta.a || '?'
@@ -76,6 +86,7 @@ export default function TopologyCanvas({ onGraphChange }) {
   const reload = useCallback(() => {
     TopologyAPI.graph().then((r) => {
       setNodes(r.data.nodes.map(toNode))
+      typeById.current = new Map(r.data.nodes.map((n) => [String(n.id), n.type]))
       const nodeById = new Map(r.data.nodes.map((n) => [String(n.id), { type: n.type, y: n.y }]))
       const buildEdges = () => r.data.edges.map((e) => {
         const edge = toEdge(e, nodeById)
@@ -113,7 +124,13 @@ export default function TopologyCanvas({ onGraphChange }) {
     if (a_interface === null) return
     const b_interface = expand(params.targetHandle) ||
       prompt('Target interface', 'GigabitEthernet0/1') || ''
-    const link_type = confirm('Trunk link? (OK = trunk, Cancel = access)') ? 'trunk' : 'access'
+    // router/switch to router/switch is always an access (blue) cable;
+    // anything else still asks
+    const infra = ['router', 'switch']
+    const bothInfra = [params.source, params.target]
+      .every((id) => infra.includes(typeById.current.get(String(id))))
+    const link_type = bothInfra ? 'access'
+      : confirm('Trunk link? (OK = trunk, Cancel = access)') ? 'trunk' : 'access'
     try {
       await TopologyAPI.addLink({
         a_device_id: Number(params.source), b_device_id: Number(params.target),
@@ -134,6 +151,20 @@ export default function TopologyCanvas({ onGraphChange }) {
     TopologyAPI.move(Number(node.id), node.position.x, node.position.y)
   }, [])
 
+  // double-click a device -> Device Management with its edit form open
+  const lastPick = useRef(0)
+  const onNodeClick = useCallback((_, node) => {
+    if (!picking) return
+    lastPick.current = Date.now()
+    onPick?.({ id: Number(node.id), ...node.data })
+  }, [picking, onPick])
+
+  const onNodeDoubleClick = useCallback((_, node) => {
+    // a fast second click while choosing packet devices is not an edit
+    if (picking || Date.now() - lastPick.current < 600) return
+    navigate(`/devices?edit=${node.id}`)
+  }, [navigate, picking])
+
   const onEdgesDelete = useCallback((deleted) => {
     deleted.forEach((e) => TopologyAPI.removeLink(Number(e.id)).catch(() => {}))
   }, [])
@@ -145,19 +176,26 @@ export default function TopologyCanvas({ onGraphChange }) {
   }, [removeById])
 
   return (
-    <div style={{ height: '70vh', border: '1px solid #334155', borderRadius: 12 }}>
+    <div style={{ height: '70vh', border: '1px solid var(--border)', borderRadius: 12 }}>
       <ReactFlow
         nodes={nodes} edges={edges}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
         onConnect={onConnect} onNodeDragStop={onNodeDragStop} onEdgesDelete={onEdgesDelete}
-        onEdgeDoubleClick={onEdgeDoubleClick}
+        onEdgeDoubleClick={onEdgeDoubleClick} onNodeDoubleClick={onNodeDoubleClick}
+        onNodeClick={onNodeClick} zoomOnDoubleClick={false} {...hoverHandlers}
+        className={`${picking ? 'picking' : ''} ${showInterfaces ? '' : 'hide-interfaces'}`}
         edgeTypes={edgeTypes} nodeTypes={nodeTypes} connectionMode="loose"
         fitView deleteKeyCode={['Backspace', 'Delete']}
+        proOptions={{ hideAttribution: true }}
       >
-        <Background color="#334155" gap={18} />
-        <MiniMap pannable zoomable style={{ background: '#0f172a' }} />
+        <Background color="var(--grid-dot)" gap={18} />
+        <MiniMap pannable zoomable style={{ background: 'var(--bg)' }}
+          nodeColor="var(--minimap-node)" maskColor="var(--minimap-mask)" />
         <Controls />
+        <PacketEnvelope trip={trip} onDone={onTripDone} />
+        {notice && <Panel position="top-center"><div className="map-notice">{notice}</div></Panel>}
       </ReactFlow>
+      {tooltip}
     </div>
   )
 }

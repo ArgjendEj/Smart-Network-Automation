@@ -9,6 +9,7 @@ from models import Device, Interface, Routing, Vlan
 from schemas import ConfigResult, ManualConfigIn
 from services import deployment_service
 from services.config_generator import generate_manual_config
+from services.device_service import MANUAL_CONFIG_DESC, check_host_address
 from services.logging_service import write_log
 
 
@@ -41,6 +42,9 @@ def _persist(db: Session, device: Device, payload: ManualConfigIn, ifaces: list[
             description=i["description"],
             enabled=i["enabled"],
         )
+        if device.device_type == "router" and i["ip_address"]:
+            # hand-typed: Smart Auto keeps this interface and its IP as they are
+            fields["description"] = MANUAL_CONFIG_DESC
         if row is None:
             db.add(Interface(device_id=device.id, name=i["name"], **fields))
         else:
@@ -96,6 +100,11 @@ def run(db: Session, payload: ManualConfigIn) -> ConfigResult:
             i["vlan_id"] = None
             if i.get("mode") in ("access", "trunk"):
                 i["mode"] = None
+
+    if device.device_type == "router":
+        for i in ifaces:
+            if i["ip_address"] and i["subnet_mask"]:
+                check_host_address(i["ip_address"], i["subnet_mask"])
 
     config = generate_manual_config(
         hostname=payload.hostname or device.hostname,

@@ -1,10 +1,11 @@
 """FastAPI application entrypoint."""
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import settings
@@ -39,6 +40,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# A browser still running a cached UI from before the X-UI-Build header existed
+# gets its HTTP cache wiped and is bounced to /login, which loads the fresh build.
+@app.middleware("http")
+async def evict_stale_ui(request: Request, call_next):
+    path = request.url.path
+    # the API docs page calls the API from a browser too, but is not our UI
+    from_docs = urlsplit(request.headers.get("referer", "")).path in ("/docs", "/redoc")
+    stale = (
+        path.startswith("/api/")
+        and "sec-fetch-site" in request.headers      # only real browsers send this
+        and "x-ui-build" not in request.headers
+        and not from_docs
+    )
+    clear = {"Clear-Site-Data": '"cache"'}
+    if stale and not path.startswith(("/api/auth/login", "/api/auth/register")):
+        return JSONResponse({"detail": "UI updated, please sign in again"}, 401, headers=clear)
+    response = await call_next(request)
+    if stale:
+        response.headers.update(clear)
+    return response
+
 for r in (
     auth, dashboard, devices, topology, smart_configuration, manual_configuration, monitoring, logs
 ):
@@ -62,4 +85,5 @@ if (_DIST / "index.html").exists():
         candidate = _DIST / full_path
         if candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(_DIST / "index.html")
+        # no-cache so the browser always picks up a freshly built UI
+        return FileResponse(_DIST / "index.html", headers={"Cache-Control": "no-cache"})

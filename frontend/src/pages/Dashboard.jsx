@@ -3,10 +3,16 @@ import DashboardCards from '../components/DashboardCards'
 import LogViewer from '../components/LogViewer'
 import { DashboardAPI, DeviceAPI } from '../services/api'
 
-// router-to-router link -> orange ; an endpoint's own address -> blue ;
-// everything else (a router's LAN gateway / management / hand-typed IP) -> green
-function ipColor(device, role) {
-  if (role === 'link') return 'var(--amber)'
+// Class A = first octet 1-126 (this project uses 10.0.0.0/8 for router links)
+function isClassA(ip) {
+  const first = parseInt(String(ip || '').split('.')[0], 10)
+  return first >= 1 && first <= 126
+}
+
+// router-to-router link or any Class A address -> orange ; an endpoint's own
+// address -> blue ; everything else (a router's LAN gateway / management / hand-typed IP) -> green
+function ipColor(device, role, ip) {
+  if (role === 'link' || isClassA(ip)) return 'var(--amber)'
   if (['pc', 'ip_phone', 'printer', 'server'].includes(device.device_type)) return 'var(--accent)'
   return 'var(--green)'
 }
@@ -36,7 +42,7 @@ export default function Dashboard() {
       <DashboardCards data={data} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Network addressing</h3>
+        <h3 style={{ marginTop: 0 }}>Network Addressing</h3>
         {withIps.length === 0
           ? <p className="muted">No IP addresses yet — run Smart Auto Config.</p>
           : (
@@ -48,7 +54,7 @@ export default function Dashboard() {
                     <tr key={d.id + '-' + i}>
                       <td>{i === 0 ? <strong>{d.hostname}</strong> : ''}</td>
                       <td className="muted">{x.interface}</td>
-                      <td style={{ color: ipColor(d, x.role), fontWeight: 600 }}>{x.ip}</td>
+                      <td style={{ color: ipColor(d, x.role, x.ip), fontWeight: 600 }}>{x.ip}</td>
                       <td className="muted">{roleLabel[x.role] || 'interface'}</td>
                     </tr>
                   )),

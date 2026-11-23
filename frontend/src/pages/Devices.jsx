@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import DeviceForm from '../components/DeviceForm'
 import DeviceTable from '../components/DeviceTable'
 import PingTest from '../components/PingTest'
@@ -12,8 +13,25 @@ export default function Devices() {
   const [dhcp, setDhcp] = useState(null)   // { pc, scopes, vlanId, result, err }
   const [msg, setMsg] = useState('')
 
+  // Config / DHCP open below the table: bring the panel into view on every click
+  const panels = { config: useRef(null), dhcp: useRef(null) }
+  const [jump, setJump] = useState(null)   // a new { to } each time
+  useEffect(() => {
+    if (jump) panels[jump.to].current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [jump])
+
   const load = () => DeviceAPI.list().then((r) => setDevices(r.data))
   useEffect(() => { load() }, [])
+
+  // /devices?edit=<id> (double-click in the topology) opens that device's form
+  const [params, setParams] = useSearchParams()
+  const editId = params.get('edit')
+  useEffect(() => {
+    if (!editId || !devices.length) return
+    const d = devices.find((x) => String(x.id) === editId)
+    if (d) { setEditing(d); window.scrollTo(0, 0) }
+    setParams({}, { replace: true })   // so Cancel / Save / refresh don't reopen it
+  }, [editId, devices, setParams])
 
   const save = async (form) => {
     try {
@@ -40,12 +58,14 @@ export default function Devices() {
   const showConfig = async (d) => {
     const r = await DeviceAPI.config(d.id)
     setConfig({ name: d.name, text: r.data.config || '! no configuration generated yet' })
+    setJump({ to: 'config' })
   }
 
   const openDhcp = async (d) => {
     setConfig(null)
     const scopes = (await DeviceAPI.dhcpScopes()).data
     setDhcp({ pc: d, scopes, subnet: '', result: null, err: '' })
+    setJump({ to: 'dhcp' })
   }
 
   const runDhcp = async () => {
@@ -90,7 +110,7 @@ export default function Devices() {
       </div>
 
       {dhcp && (
-        <div className="card">
+        <div className="card" ref={panels.dhcp} style={{ scrollMarginTop: 16 }}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <h3 style={{ margin: 0 }}>DHCP — {dhcp.pc.name}</h3>
             <button onClick={() => setDhcp(null)}>Close</button>
@@ -133,7 +153,7 @@ export default function Devices() {
       <PingTest />
 
       {config && (
-        <div className="card">
+        <div className="card" ref={panels.config} style={{ scrollMarginTop: 16 }}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <h3 style={{ margin: 0 }}>{config.name} — last configuration</h3>
             <button onClick={() => setConfig(null)}>Close</button>

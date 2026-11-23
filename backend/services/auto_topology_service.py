@@ -16,9 +16,11 @@ import json
 from sqlalchemy.orm import Session
 
 from models import ENDPOINT_TYPES, Connection, Device, Interface, Routing, Vlan
+from services.device_service import MANUAL_CONFIG_DESC, is_hand_typed
 from services.config_generator import generate_auto_router_config, generate_auto_switch_config
 from services.logging_service import write_log
 from services.smart_config_service import ROUTER_IFACE_POOL, _IfaceAllocator, _sync_connection
+from services.topology_service import port_name
 
 
 # local networks come out of 192.168.0.0/16 ; router-to-router links out of 10.0.0.0/8
@@ -31,6 +33,18 @@ def _lan_pools():
 def _wan_pools():
     for net in ipaddress.ip_network("10.0.0.0/8").subnets(new_prefix=30):
         yield net
+
+
+def _host_in(net, ip: str) -> str:
+    """`ip`, or the nearest address a device can really use when it is the
+    network / broadcast address of `net` (10.1.1.0/30 -> 10.1.1.1)."""
+    a = ipaddress.ip_address(ip)
+    if net.prefixlen < 31:
+        if a == net.network_address:
+            a += 1
+        elif a == net.broadcast_address:
+            a -= 1
+    return str(a)
 
 
 def _sanitize(iface: str) -> str:
@@ -96,7 +110,7 @@ def _db_lans(db: Session, rid: int) -> list[dict]:
             continue
         desc = (i.description or "")
         if desc.startswith("LAN ") or (
-            desc.lower() == "manual" and not str(i.ip_address).startswith("10.")
+            is_hand_typed(desc) and not str(i.ip_address).startswith("10.")
         ):
             out.append(_lan_from_iface(i))
     return out
@@ -109,7 +123,7 @@ def _db_wans(db: Session, rid: int) -> list[dict]:
             continue
         desc = (i.description or "")
         if desc.startswith("link to ") or (
-            desc.lower() == "manual" and str(i.ip_address).startswith("10.")
+            is_hand_typed(desc) and str(i.ip_address).startswith("10.")
         ):
             out.append(_wan_from_iface(db, i))
     return out
@@ -119,7 +133,10 @@ def _asn(device_id: int) -> int:
     return 65000 + min(device_id, 500)     # private ASN range 64512-65534
 
 
-def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = False) -> dict:
+def run(
+    db: Session, scope: str = "all", routing: str = "ospf", nat: bool = False,
+    overwrite_manual: bool = False,
+) -> dict:
     if scope not in ("all", "lan", "wan"):
         raise ValueError("scope must be 'all', 'lan' or 'wan'.")
     if routing not in ("ospf", "bgp", "both"):
@@ -135,6 +152,21 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
     if not conns:
         raise ValueError("Connect the devices with cables in the Topology view first.")
 
+    if overwrite_manual:
+        # the admin chose Smart Auto over their hand-typed router interfaces: drop
+        # them (for the requested scope) so this run starts clean, nothing mixed
+        for i in db.query(Interface).all():
+            d = devices.get(i.device_id)
+            if d is None or d.device_type != "router" or not is_hand_typed(i.description):
+                continue
+            is_link = str(i.ip_address or "").startswith("10.")
+            if (do_wan if is_link else do_lan):
+                # a management IP that was only filled in from this interface goes too
+                if d.mgmt_ip == i.ip_address:
+                    d.mgmt_ip = None
+                db.delete(i)
+        db.flush()
+
     # collapse duplicate cables between the same two devices (they pile up from
     # re-cabling / re-runs). Keep the row that points at a hand-typed interface,
     # else the most recently drawn one. Two routers may legitimately have
@@ -144,7 +176,7 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
     _hand_typed = {
         (i.device_id, i.name)
         for i in db.query(Interface).all()
-        if (i.description or "").lower() == "manual"
+        if is_hand_typed(i.description)
     }
 
     def _conn_rank(c: Connection) -> tuple:
@@ -224,14 +256,17 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
         for i in db.query(Interface).all()
         if i.ip_address and i.subnet_mask
     }
-    # interfaces the admin filled in by hand (Devices -> Edit -> Interface IPs).
-    # 10.x manual IPs feed router-to-router links; everything else (192.168.x,
-    # 172.16.x ...) is a hand-picked LAN gateway for a switch segment.
+    # interfaces the admin filled in by hand (Devices -> Edit -> Interface IPs,
+    # or the Manual Configuration page). 10.x manual IPs feed router-to-router
+    # links; everything else (192.168.x, 172.16.x ...) is a hand-picked LAN
+    # gateway for a switch segment.
     manual_ifaces: dict[int, list[str]] = {}
     lan_manual_ifaces: dict[int, list[str]] = {}
+    hand_desc: dict[tuple[int, str], str] = {}   # -> its marker, kept on re-save
     for (did, name), i in existing_ip.items():
-        if (i.description or "").lower() != "manual":
+        if not is_hand_typed(i.description):
             continue
+        hand_desc[(did, name)] = i.description.lower()
         if str(i.ip_address).startswith("10."):
             manual_ifaces.setdefault(did, []).append(name)
         else:
@@ -252,11 +287,32 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
     iface_purpose: dict[tuple[int, str], str] = {}
     for i in db.query(Interface).all():
         desc = (i.description or "").lower()
-        purpose = "lan" if desc.startswith("lan") else "wan" if desc.startswith(("link to", "point-to-point")) else "manual" if desc == "manual" else "other"
+        purpose = "lan" if desc.startswith("lan") else "wan" if desc.startswith(("link to", "point-to-point")) else "manual" if is_hand_typed(desc) else "other"
         iface_purpose[(i.device_id, i.name)] = purpose
 
-    def _pick_iface(conn, dev_id: int, want: str, prefer_manual: bool = False) -> str:
+    def _faces_peer(i: Interface, peer_id: int) -> bool:
+        """True if this hand-typed 10.x interface's /30 already holds an address
+        of `peer_id` - i.e. the admin typed it for the link to that router."""
+        try:
+            net = ipaddress.ip_network(f"{i.ip_address}/30", strict=False)
+            return any(ipaddress.ip_address(x.ip_address) in net
+                       for (did, _), x in existing_ip.items() if did == peer_id)
+        except ValueError:
+            return False
+
+    def _pick_iface(conn, dev_id: int, want: str, prefer_manual: bool = False,
+                    peer_id: int | None = None) -> str:
         named = _iface_for(conn, dev_id)
+
+        if want == "wan" and prefer_manual:
+            mine = [m for m in manual_ifaces.get(dev_id, []) if (dev_id, m) not in used_manual]
+            # a hand-typed interface wins over one remembered from an earlier auto
+            # run: the one the cable sits on, else one typed for this very peer
+            hit = named if named in mine else next(
+                (m for m in mine if _faces_peer(existing_ip[(dev_id, m)], peer_id)), None)
+            if hit:
+                used_manual.add((dev_id, hit))
+                return hit
 
         if want == "lan":
             pool = [m for m in lan_manual_ifaces.get(dev_id, [])
@@ -306,7 +362,10 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
             return lan_vlan_id[key]
         net = ipaddress.ip_network(key, strict=False)
         if str(net.network_address).startswith("192.168.") and net.prefixlen == 24:
-            vid = net.network_address.packed[2] * 10 or 10   # 192.168.X.0/24 -> X*10
+            # 192.168.X.0/24 -> X*10 (1 -> 10, 20 -> 200); a three-digit X is used as
+            # it is (100 -> 100), or as X*10 when another LAN already has that number
+            x = net.network_address.packed[2]
+            vid = x if x >= 100 and x not in lan_vlan_id.values() else x * 10 or 10
         else:
             vid = _next_vlan_id[0]
             _next_vlan_id[0] += 10
@@ -322,13 +381,16 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
     def _typed_ip(router: Device):
         if not router.mgmt_ip or router.id in mgmt_used:
             return None
-        if any(i.ip_address == router.mgmt_ip
-               for (did, _), i in existing_ip.items() if did == router.id):
-            return None
         try:
-            return ipaddress.ip_address(router.mgmt_ip)
+            typed = ipaddress.ip_address(router.mgmt_ip)
         except ValueError:
             return None
+        placed = {router.mgmt_ip} | {
+            _host_in(ipaddress.ip_network(f"{typed}/{p}", strict=False), str(typed)) for p in (24, 30)}
+        if any(i.ip_address in placed
+               for (did, _), i in existing_ip.items() if did == router.id):
+            return None
+        return typed
 
     def _classA_link(router: Device):
         """Admin-typed Class-A address -> use it verbatim on a router-to-router
@@ -338,7 +400,8 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
         if a is None or not str(a).startswith("10."):
             return None
         mgmt_used.add(router.id)
-        return ipaddress.ip_network(f"{a}/30", strict=False), str(a)
+        net = ipaddress.ip_network(f"{a}/30", strict=False)
+        return net, _host_in(net, str(a))
 
     def _partner_host(net, anchor_ip):
         anchor = ipaddress.ip_address(anchor_ip)
@@ -356,7 +419,8 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
         if addr is None:
             return None
         mgmt_used.add(router.id)
-        return ipaddress.ip_network(f"{addr}/24", strict=False), str(addr)
+        net = ipaddress.ip_network(f"{addr}/24", strict=False)
+        return net, _host_in(net, str(addr))
 
     for r in routers:
         for c, peer_id in adj.get(r.id, []):
@@ -373,12 +437,13 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
             if is_wan and c.id in done_wan:
                 continue  # this exact cable was already turned into a WAN link
             done_lan.add((r.id, peer_id))
-            r_iface = _pick_iface(c, r.id, "wan" if is_wan else "lan", prefer_manual=is_wan)
+            r_iface = _pick_iface(c, r.id, "wan" if is_wan else "lan", prefer_manual=is_wan,
+                                  peer_id=peer.id)
             _set_conn_iface(c, r.id, r_iface)
 
             if is_wan:
                 done_wan.add(c.id)
-                p_iface = _pick_iface(c, peer.id, "wan", prefer_manual=True)
+                p_iface = _pick_iface(c, peer.id, "wan", prefer_manual=True, peer_id=r.id)
                 _set_conn_iface(c, peer.id, p_iface)
 
                 # router-to-router links are Class A (10.x). Priority:
@@ -387,17 +452,27 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
                 #  3) an auto /30 from 10.0.0.0/8
                 r_have = existing_ip.get((r.id, r_iface))
                 p_have = existing_ip.get((peer.id, p_iface))
-                have = (r_have if r_have and str(r_have.ip_address).startswith("10.") else None) \
-                    or (p_have if p_have and str(p_have.ip_address).startswith("10.") else None)
+                cands = [x for x in (r_have, p_have) if x and str(x.ip_address).startswith("10.")]
+                # a hand-typed end wins, so its IP is never replaced by the peer's;
+                # between equals, the one whose address is usable in the /30
+                cands.sort(key=lambda x: (
+                    not is_hand_typed(x.description),
+                    _host_in(ipaddress.ip_network(f"{x.ip_address}/30", strict=False),
+                             x.ip_address) != x.ip_address,
+                ))
+                have = cands[0] if cands else None
                 r_typed, p_typed = _classA_link(r), _classA_link(peer)
                 if have is not None:
                     # router-to-router links are always a /30 (255.255.255.252)
                     net = ipaddress.ip_network(f"{have.ip_address}/30", strict=False)
-                    other = _partner_host(net, have.ip_address)
-                    if have is r_have:
-                        r_ip, p_ip = have.ip_address, other
-                    else:
-                        p_ip, r_ip = have.ip_address, other
+                    mine = _host_in(net, have.ip_address)
+                    other_have = p_have if have is r_have else r_have
+                    other = None
+                    if other_have and ipaddress.ip_address(other_have.ip_address) in net:
+                        other = _host_in(net, other_have.ip_address)
+                    if other is None or other == mine:   # else both ends typed - keep both
+                        other = _partner_host(net, mine)
+                    r_ip, p_ip = (mine, other) if have is r_have else (other, mine)
                 elif r_typed is not None:
                     net, r_ip = r_typed
                     p_ip = _partner_host(net, r_ip)
@@ -424,7 +499,7 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
                 if have:
                     # a hand-typed interface IP (or one from a previous run)
                     net = ipaddress.ip_network(f"{have.ip_address}/{have.subnet_mask}", strict=False)
-                    gw = have.ip_address
+                    gw = _host_in(net, have.ip_address)
                 else:
                     mgmt = _mgmt_lan(r)
                     if mgmt is not None:
@@ -489,7 +564,7 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
     # give every LAN network a globally-unique VLAN id (10, 20, 30 ...) in a
     # deterministic order, so it is consistent on the router, the switch and DHCP
     for lan in sorted(
-        (l for lans in router_lans.values() for l in lans),
+        (l for r in routers for l in (router_lans[r.id] if do_lan else _db_lans(db, r.id))),
         key=lambda l: ipaddress.ip_address(l["network"]),
     ):
         _vlan_for(lan)
@@ -585,7 +660,7 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
             recreated_names |= {wan["iface"] for wan in wans}
         for i in db.query(Interface).filter(Interface.device_id == r.id).all():
             desc = (i.description or "")
-            if desc.lower() == "manual" and i.name not in recreated_names:
+            if is_hand_typed(desc) and i.name not in recreated_names:
                 continue  # hand-typed interface IP not (yet) used by a link - keep it
             if keep_prefix and desc.startswith(keep_prefix):
                 continue  # keep the other scope's interfaces untouched
@@ -602,7 +677,7 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
                 db.add(Interface(
                     device_id=r.id, name=lan["iface"], ip_address=lan["gateway"],
                     subnet_mask=lan["netmask"], mode="routed",
-                    description="manual" if is_manual
+                    description=hand_desc[(r.id, lan["iface"])] if is_manual
                     else f"LAN {lan['network']}/{lan['prefix']}", enabled=True,
                 ))
             db.add(Vlan(device_id=r.id, vlan_id=vid, name=f"DATA_VLAN{vid}",
@@ -611,10 +686,13 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
             nets.append(f"{lan['network']} {lan['wildcard']} area 0")
         for wan in wans:
             if do_wan:
+                is_manual = (r.id, wan["iface"]) in used_manual
                 db.add(Interface(
                     device_id=r.id, name=wan["iface"], ip_address=wan["ip"],
                     subnet_mask=wan["netmask"], mode="routed",
-                    description=f"link to {wan['peer_hostname']}", enabled=True,
+                    description=hand_desc[(r.id, wan["iface"])] if is_manual
+                    else f"link to {wan['peer_hostname']}",
+                    enabled=True,
                 ))
             nets.append(f"{wan['network']} {wan['wildcard']} area 0")
         if routing in ("ospf", "both"):
@@ -649,7 +727,16 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
             db.query(Vlan).filter(Vlan.device_id == sw.id).delete()
             db.add(Vlan(device_id=sw.id, vlan_id=vlan_id, name=vlan_name,
                         subnet=network, gateway=lan["gateway"]))
+        # cabled ports the Fa0/1-24 range does not cover (e.g. a printer on Gi0/1)
+        extra_ports = sorted({
+            (port_name(_iface_for(c, sw.id)), devices[nb].device_type in ENDPOINT_TYPES)
+            for c, nb in adj[sw.id]
+            if devices.get(nb) is not None and devices[nb].device_type != "router"
+            and port_name(_iface_for(c, sw.id)).startswith("GigabitEthernet")
+            and port_name(_iface_for(c, sw.id)) != port_name(uplink if info else None)
+        })
         cfg = generate_auto_switch_config(
+            extra_ports=extra_ports,
             hostname=sw.hostname, uplink=uplink, router_hostname=router_hostname,
             vlan_id=vlan_id, vlan_name=vlan_name, network=network,
             ssh_username=sw.ssh_username, ssh_password=sw.ssh_password,
@@ -658,6 +745,22 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
         sw.last_config = cfg
         sw.status = "online"
         results.append({"device": sw.hostname, "config": cfg, "vlan_id": vlan_id})
+
+    def _from_manual_page(rid: int, iface: str) -> bool:
+        return hand_desc.get((rid, iface)) == MANUAL_CONFIG_DESC
+
+    def _lan_summary(l: dict) -> dict:
+        network = f"{l['network']}/{l['prefix']}"
+        vid = lan_vlan_id.get(network)
+        return {
+            "iface": l["iface"], "network": network, "netmask": l["netmask"],
+            "gateway": l["gateway"], "vlan_id": vid,
+            "vlan_name": f"DATA_VLAN{vid}" if vid else None,
+            "dhcp_pool": l["pool_name"],
+            "dhcp_range": f"{ipaddress.ip_address(l['exclude_to']) + 1} - "
+                          f"{l['_net'].broadcast_address - 1}",
+            "hosts": sum(1 for a in pc_assignments if a["network"] == network),
+        }
 
     db.commit()
     write_log(db, f"Auto configuration ({scope}, {routing}, nat={nat}) from topology: "
@@ -671,22 +774,25 @@ def run(db: Session, scope: str = "all", routing: str = "ospf", nat: bool = Fals
             "dns": dns_ip, "syslog": syslog_ip, "ntp": ntp_ip, "dhcp_relay": dhcp_relay_ip,
         },
         "results": results,
-        "segments": [
+        # a router whose interfaces here are all manual ones is left out entirely
+        "segments": [seg for seg in (
             {
                 "router": r.hostname,
+                "router_id": f"{min(r.id, 255)}.{min(r.id, 255)}.{min(r.id, 255)}.{min(r.id, 255)}",
                 "asn": _asn(r.id) if routing in ("bgp", "both") else None,
                 "nat_outside": router_wans[r.id][0]["iface"] if (nat and router_wans[r.id]) else None,
-                "lan": [{"iface": l["iface"], "network": f"{l['network']}/{l['prefix']}",
-                         "gateway": l["gateway"], "vlan_id": lan_vlan_id.get(f"{l['network']}/{l['prefix']}")}
-                        for l in router_lans[r.id]],
+                # only what Smart Auto chose - interfaces set on the Manual
+                # Configuration page are left out of this summary
+                "lan": [_lan_summary(l) for l in router_lans[r.id] if not _from_manual_page(r.id, l["iface"])],
                 "links": [
-                    {"iface": w["iface"], "ip": w["ip"], "peer": w["peer_hostname"],
+                    {"iface": w["iface"], "ip": w["ip"], "netmask": w["netmask"],
+                     "network": f"{w['network']}/30", "peer": w["peer_hostname"],
                      "peer_ip": w.get("peer_ip"),
                      "peer_asn": w.get("peer_asn") if routing in ("bgp", "both") else None}
-                    for w in router_wans[r.id]
+                    for w in router_wans[r.id] if not _from_manual_page(r.id, w["iface"])
                 ],
             }
             for r in routers if router_lans[r.id] or router_wans[r.id]
-        ],
+        ) if seg["lan"] or seg["links"]],
         "dhcp": pc_assignments,
     }

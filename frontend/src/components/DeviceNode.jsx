@@ -1,6 +1,6 @@
 import { Handle, Position } from 'reactflow'
 
-const icon = { router: '🔀', switch: '🔗', pc: '💻', ip_phone: '📞', printer: '🖨️', server: '🗄️' }
+export const icon = { router: '🔀', switch: '🔗', pc: '💻', ip_phone: '📞', printer: '🖨️', server: '🗄️' }
 
 // how many physical ports each device type shows
 export const PORTS = {
@@ -17,7 +17,7 @@ export const PORTS = {
 }
 
 const dot = {
-  width: 9, height: 9, background: '#38bdf8', border: '2px solid #0f172a', borderRadius: '50%',
+  width: 9, height: 9, background: 'var(--accent)', border: '2px solid var(--bg)', borderRadius: '50%',
 }
 
 // when the same port name exists on both sides (pc/phone/printer/server -
@@ -42,12 +42,12 @@ function row(list, position, otherList) {
 
 export default function DeviceNode({ data }) {
   const ports = PORTS[data.type] || PORTS.pc
-  const statusColor = data.status === 'online' ? '#22c55e'
-    : data.status === 'offline' ? '#ef4444' : '#94a3b8'
+  const statusColor = data.status === 'online' ? 'var(--green)'
+    : data.status === 'offline' ? 'var(--red)' : 'var(--muted)'
 
   return (
     <div style={{
-      background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155',
+      background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--border)',
       borderRadius: 10, padding: '10px 14px', width: 130, textAlign: 'center', fontSize: 12,
     }}>
       {row(ports.top, Position.Top, ports.bottom)}

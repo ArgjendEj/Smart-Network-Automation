@@ -23,6 +23,14 @@ def graph(db: Session = Depends(get_db)):
     return topology_service.get_graph(db)
 
 
+@router.get("/devices/{device_id}/info")
+def device_info(device_id: int, db: Session = Depends(get_db)):
+    info = topology_service.device_info(db, device_id)
+    if info is None:
+        raise HTTPException(404, "Device not found")
+    return info
+
+
 @router.post("/connections", response_model=ConnectionOut, status_code=201)
 def add_connection(data: ConnectionCreate, db: Session = Depends(get_db)):
     try:

@@ -7,13 +7,15 @@ export default function SmartConfiguration() {
   const [err, setErr] = useState('')
   const [autoBusy, setAutoBusy] = useState(false)
   const [autoRes, setAutoRes] = useState(null)
-  const [autoRouting, setAutoRouting] = useState('ospf')
+  const [autoRouting, setAutoRouting] = useState('')
   const [autoNat, setAutoNat] = useState(false)
+  const [overwriteManual, setOverwriteManual] = useState(false)
 
   const doAuto = async (scope) => {
+    if (!autoRouting) { setErr('Select a routing protocol first.'); return }
     setErr(''); setAutoBusy(scope); setAutoRes(null)
     try {
-      const r = await SmartAPI.auto(scope, autoRouting, autoNat)
+      const r = await SmartAPI.auto(scope, autoRouting, autoNat, overwriteManual)
       setAutoRes({ ...r.data, scope })
       setResults(r.data.results.map((x) => ({
         device_id: x.device, device_name: x.device, config: x.config, deployed: false,
@@ -36,7 +38,8 @@ export default function SmartConfiguration() {
         </p>
         <div className="row" style={{ marginBottom: 10 }}>
           <label className="muted" style={{ fontSize: 13 }}>Routing protocol between routers:</label>
-          <select value={autoRouting} onChange={(e) => setAutoRouting(e.target.value)}>
+          <select value={autoRouting} onChange={(e) => { setAutoRouting(e.target.value); setErr('') }}>
+            <option value="">-- Select --</option>
             <option value="ospf">OSPF</option>
             <option value="bgp">BGP (eBGP, one AS per router)</option>
             <option value="both">OSPF + BGP (both at once)</option>
@@ -44,6 +47,11 @@ export default function SmartConfiguration() {
           <label className="row" style={{ gap: 6, fontSize: 13 }}>
             <input type="checkbox" checked={autoNat} onChange={(e) => setAutoNat(e.target.checked)} />
             Enable NAT overload (PAT) on routers
+          </label>
+          <label className="row" style={{ gap: 6, fontSize: 13 }}>
+            <input type="checkbox" checked={overwriteManual}
+              onChange={(e) => setOverwriteManual(e.target.checked)} />
+            Replace manual configurations with Smart Auto
           </label>
         </div>
         <div className="row">
@@ -77,21 +85,27 @@ export default function SmartConfiguration() {
             </p>
             {autoRes.segments.map((s) => (
               <div key={s.router} className="ping-result ping-ok" style={{ marginBottom: 8 }}>
-                <b>{s.router}</b>{s.asn ? <span className="muted"> · AS {s.asn}</span> : null}
+                <b>{s.router}</b>
+                <span className="muted"> · router-id {s.router_id}</span>
+                {['ospf', 'both'].includes(autoRes.routing) && <span className="muted"> · OSPF area 0</span>}
+                {s.asn ? <span className="muted"> · BGP AS {s.asn}</span> : null}
                 {s.nat_outside && (
                   <span className="muted"> · NAT outside: {s.nat_outside}</span>
                 )}
                 {s.lan.map((l, i) => (
-                  <div key={i} style={{ fontSize: 13 }}>
-                    LAN {l.iface} → {l.network} · gateway {l.gateway}
-                    {l.vlan_id ? ` · VLAN ${l.vlan_id}` : ''} · DHCP on
+                  <div key={i} style={{ fontSize: 13, marginTop: 6 }}>
+                    <b>LAN {l.iface}</b> → {l.network} ({l.netmask}) · gateway <b>{l.gateway}</b>
+                    {l.vlan_id ? ` · VLAN ${l.vlan_id} (${l.vlan_name})` : ''}
                     {s.nat_outside ? ' · NAT inside' : ''}
+                    <div className="muted" style={{ fontSize: 12, paddingLeft: 14 }}>
+                      DHCP pool {l.dhcp_pool}: {l.dhcp_range} · {l.hosts} host(s) got an address
+                    </div>
                   </div>
                 ))}
                 {s.links.map((l, i) => (
-                  <div key={i} style={{ fontSize: 13 }}>
-                    Link {l.iface} → {l.ip} ↔ {l.peer}
-                    {l.peer_asn ? <span className="muted"> (BGP neighbor {l.peer_ip}, AS {l.peer_asn})</span> : null}
+                  <div key={i} style={{ fontSize: 13, marginTop: 6 }}>
+                    <b>Link {l.iface}</b> → {l.ip} ({l.netmask}) · network {l.network} ↔ <b>{l.peer}</b> ({l.peer_ip})
+                    {l.peer_asn ? <span className="muted"> · BGP neighbor {l.peer_ip}, AS {l.peer_asn}</span> : null}
                   </div>
                 ))}
               </div>

@@ -24,6 +24,17 @@ interface range {{ access_range }}
  spanning-tree portfast
  no shutdown
 !
+{% for port, is_host in extra_ports %}
+interface {{ port }}
+ description ### {{ vlan_name }} access ###
+ switchport mode access
+ switchport access vlan {{ vlan_id }}
+{% if is_host %}
+ spanning-tree portfast
+{% endif %}
+ no shutdown
+!
+{% endfor %}
 {% else %}
 interface range {{ access_range }}
  switchport mode access

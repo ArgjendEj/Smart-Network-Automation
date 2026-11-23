@@ -10,6 +10,35 @@
   --green: #22c55e;
   --red: #ef4444;
   --amber: #f59e0b;
+  --cable-access: #38bdf8;
+  --cable-trunk: #f59e0b;
+  --on-accent: #04283a;
+  --code-bg: #020617;
+  --grid-dot: #334155;
+  --minimap-node: #e2e2e2;
+  --minimap-mask: rgba(240, 240, 240, .6);
+}
+
+/* same roles, darker hues so coloured text stays readable on white */
+:root[data-theme='light'] {
+  --bg: #f1f5f9;
+  --panel: #ffffff;
+  --panel-2: #e8eef5;
+  --border: #cbd5e1;
+  --text: #0f172a;
+  --muted: #475569;
+  --accent: #0369a1;
+  --accent-2: #0369a1;
+  --green: #166534;
+  --red: #b91c1c;
+  --amber: #c2410c;
+  --cable-access: #0284c7;
+  --cable-trunk: #ea580c;
+  --on-accent: #ffffff;
+  --code-bg: #f8fafc;
+  --grid-dot: #b6c2d1;
+  --minimap-node: #64748b;
+  --minimap-mask: rgba(148, 163, 184, .35);
 }
 
 * { box-sizing: border-box; }
@@ -29,7 +58,7 @@ button {
   padding: 8px 14px;
   border-radius: 8px;
 }
-button.primary { background: var(--accent-2); border-color: var(--accent-2); color: #04283a; font-weight: 600; }
+button.primary { background: var(--accent-2); border-color: var(--accent-2); color: var(--on-accent); font-weight: 600; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 input, select {
   font: inherit;
@@ -55,7 +84,7 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
 .pill.offline { background: rgba(239,68,68,.15); color: var(--red); }
 .pill.unknown { background: rgba(148,163,184,.15); color: var(--muted); }
 pre.config {
-  background: #020617; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
   padding: 14px; overflow: auto; font-size: 12.5px; line-height: 1.5; max-height: 460px;
 }
 .error { color: var(--red); }
@@ -99,3 +128,32 @@ pre.config {
 .login-wrap { display: grid; place-items: center; min-height: 100vh; }
 .login-card { width: 340px; }
 .field { display: grid; gap: 6px; margin-bottom: 14px; }
+
+/* hide the React Flow attribution link on the topology canvas */
+.react-flow__attribution { display: none !important; }
+
+/* packet test on the topology canvas */
+.react-flow.picking .react-flow__node { cursor: crosshair; }
+.map-notice {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 14px; font-size: 13px; font-weight: 600;
+}
+
+/* device info box on the topology canvas (rest the mouse on a device) */
+.device-tooltip {
+  position: fixed; z-index: 50; pointer-events: none; font-size: 12.5px; max-width: calc(100vw - 16px);
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(2, 6, 23, .35); overflow: hidden;
+}
+.device-tooltip-head {
+  display: flex; gap: 10px; align-items: center; padding: 10px 14px; line-height: 1.5;
+  background: var(--panel-2); border-bottom: 1px solid var(--border);
+}
+.device-tooltip table { width: auto; min-width: 100%; }
+.device-tooltip th, .device-tooltip td { padding: 5px 14px; white-space: nowrap; }
+.device-tooltip th { font-size: 12px; }
+.device-tooltip td { font-variant-numeric: tabular-nums; }
+.device-tooltip tr:last-child td { border-bottom: 0; }
+
+/* Hide interfaces: the names (and ✕) on the topology cables */
+.react-flow.hide-interfaces .cable-label { display: none !important; }

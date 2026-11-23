@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MonitoringAPI } from '../services/api'
+import TerminalIcon from './TerminalIcon'
 
 export default function PingTest() {
   const [endpoints, setEndpoints] = useState([])
@@ -12,16 +13,25 @@ export default function PingTest() {
   const load = () => MonitoringAPI.endpoints().then((r) => setEndpoints(r.data)).catch(() => {})
   useEffect(() => { load() }, [])
 
+  const attempt = useRef(0)      // an answer that arrives after Refresh is dropped
   const run = async () => {
+    const mine = ++attempt.current
     setBusy(true); setErr(''); setRes(null)
     try {
       const r = await MonitoringAPI.ping({ mode: 'design', source_ip: source, target, count: 5 })
-      setRes(r.data)
+      if (mine === attempt.current) setRes(r.data)
     } catch (e) {
-      setErr(e.response?.data?.detail || 'Ping failed')
+      if (mine === attempt.current) setErr(e.response?.data?.detail || 'Ping failed')
     } finally {
-      setBusy(false)
+      if (mine === attempt.current) setBusy(false)
     }
+  }
+
+  // clear everything for the next ping
+  const reset = () => {
+    attempt.current += 1
+    setSource(''); setTarget(''); setRes(null); setErr(''); setBusy(false)
+    load()
   }
 
   const swap = () => { setSource(target); setTarget(source); setRes(null) }
@@ -30,8 +40,12 @@ export default function PingTest() {
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h3 style={{ margin: 0 }}>Ping test</h3>
-        <button style={{ padding: '2px 8px', fontSize: 12 }} onClick={load}>↻ reload IPs</button>
+        <h3 className="row" style={{ margin: 0, gap: 10 }}><TerminalIcon /> Ping test</h3>
+        <div className="row">
+          <button style={{ padding: '2px 8px', fontSize: 12 }} onClick={reset}
+            title="Clear for the next ping">🔄 Refresh</button>
+          <button style={{ padding: '2px 8px', fontSize: 12 }} onClick={load}>↻ reload IPs</button>
+        </div>
       </div>
 
       <datalist id="ping-endpoints">
@@ -87,7 +101,7 @@ export default function PingTest() {
       )}
 
       <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>
-        Checks your topology + IP plan (subnets, gateways, OSPF) to tell you whether the ping
+        Checks your topology + IP plan (subnets, gateways, OSPF, BGP) to tell you whether the ping
         would succeed on a real network — no simulator, no devices touched.
       </p>
     </div>

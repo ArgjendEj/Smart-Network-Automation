@@ -44,7 +44,11 @@ def update(device_id: int, data: DeviceUpdate, db: Session = Depends(get_db)):
     device = device_service.get_device(db, device_id)
     if device is None:
         raise HTTPException(404, "Device not found")
-    device = device_service.update_device(db, device, data)
+    try:
+        device = device_service.update_device(db, device, data)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc))
     write_log(db, f"Device '{device.name}' edited", category="config", device_id=device.id)
     return device
 

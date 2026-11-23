@@ -23,6 +23,30 @@ class PingIn(BaseModel):
     count: int = 5
 
 
+class PacketIn(BaseModel):
+    source_device_id: int
+    target_device_id: int
+
+
+@router.post("/packet")
+def packet(data: PacketIn, db: Session = Depends(get_db)):
+    """One envelope between two devices - verdict + the cables it crosses."""
+    try:
+        result = monitoring_service.trace_packet(db, data.source_device_id, data.target_device_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    write_log(
+        db,
+        f"[packet] {result['source']} -> {result['target']}: "
+        f"{'Successful' if result['ok'] else 'Failed'}",
+        level="info" if result["ok"] else "warning",
+        category="system",
+        device_id=data.source_device_id,
+        detail=f"{' -> '.join(result['path'])} | {result['reason']}",
+    )
+    return result
+
+
 @router.get("/endpoints")
 def endpoints(db: Session = Depends(get_db)):
     """Every IP actually assigned in the design — the only valid ping sources/targets."""

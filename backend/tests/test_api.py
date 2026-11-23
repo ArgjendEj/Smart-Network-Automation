@@ -27,6 +27,13 @@ def _auth():
     return {"Authorization": f"Bearer {_token()}"}
 
 
+def _device(h, name, device_type):
+    """A fresh device of its own, so a manual config never pins the shared seed
+    devices that later Smart Auto tests regenerate."""
+    return client.post("/api/devices", json={"name": name, "hostname": name,
+                                             "device_type": device_type}, headers=h).json()
+
+
 def test_health():
     assert client.get("/api/health").json() == {"status": "ok"}
 
@@ -96,10 +103,10 @@ def test_smart_config_preview_and_run():
 
 def test_manual_config_run():
     h = _auth()
-    switch = next(d for d in client.get("/api/devices", headers=h).json() if d["device_type"] == "switch")
+    switch = _device(h, "SWMANUAL", "switch")
     payload = {
         "device_id": switch["id"],
-        "hostname": "SW1",
+        "hostname": "SWMANUAL",
         "vlans": [{"vlan_id": 30, "name": "HR"}],
         "interfaces": [{"name": "GigabitEthernet0/2", "mode": "access", "vlan_id": 30}],
         "dhcp": [],
@@ -146,7 +153,7 @@ def test_switch_gets_ssh_block_but_no_ip():
 
 def test_manual_config_ospf_and_bgp_on_router():
     h = _auth()
-    router = next(d for d in client.get("/api/devices", headers=h).json() if d["device_type"] == "router")
+    router = _device(h, "RMANUAL1", "router")
     payload = {
         "device_id": router["id"],
         "interfaces": [{"name": "GigabitEthernet0/1", "ip_address": "192.168.1.1", "subnet_mask": "255.255.255.0"}],
@@ -173,7 +180,7 @@ def test_manual_config_ospf_and_bgp_on_router():
 
 def test_manual_config_router_never_gets_vlan_commands():
     h = _auth()
-    router = next(d for d in client.get("/api/devices", headers=h).json() if d["device_type"] == "router")
+    router = _device(h, "RMANUAL2", "router")
     payload = {
         "device_id": router["id"],
         "vlans": [{"vlan_id": 40, "name": "SALES"}],
@@ -340,8 +347,9 @@ def test_pc_gets_dhcp_address():
         headers=h,
     )
     scopes = client.get("/api/devices/dhcp/scopes", headers=h).json()
-    assert scopes and scopes[0]["free"] > 0
-    subnet = scopes[0]["subnet"]
+    scope = next(s for s in scopes if s["subnet"].startswith("10.10.0."))   # the Sales LAN
+    assert scope["free"] > 0
+    subnet = scope["subnet"]
 
     r = client.post(f"/api/devices/{pc['id']}/dhcp", json={"subnet": subnet}, headers=h)
     assert r.status_code == 200, r.text
@@ -539,7 +547,12 @@ def test_new_switch_takes_a_hand_typed_gateway_added_later():
 
     client.put(
         f"/api/devices/{rz['id']}",
-        json={"extra_ips": [{"interface": "GigabitEthernet0/3", "address": "192.168.55.1/24"}]},
+        # like the Edit form: every interface already listed, plus the new one
+        json={"extra_ips": [
+            {"interface": x["interface"], "address": x["ip"]}
+            for x in client.get(f"/api/devices/{rz['id']}", headers=h).json()["ip_addresses"]
+            if x["role"] != "mgmt"
+        ] + [{"interface": "GigabitEthernet0/3", "address": "192.168.55.1/24"}]},
         headers=h,
     )
     sz2 = client.post("/api/devices", json={"name": "SZ2", "hostname": "SZ2", "device_type": "switch"}, headers=h).json()
@@ -555,6 +568,10 @@ def test_new_switch_takes_a_hand_typed_gateway_added_later():
     r3 = client.post("/api/smart-config/auto", json={"scope": "lan"}, headers=h).json()
     got3 = {d["pc"]: d["ip"] for d in r3["dhcp"]}
     assert got3["PZ1"] == ip1 and got3["PZ2"] == got2["PZ2"]
+    # a gateway typed under Devices -> Edit is still listed in the Smart summary
+    seg = next(s for s in r3["segments"] if s["router"] == rz["hostname"])
+    lan55 = next(l for l in seg["lan"] if l["gateway"] == "192.168.55.1")
+    assert lan55["dhcp_range"] == "192.168.55.2 - 192.168.55.254" and lan55["hosts"] == 1
 
 
 def test_pc_behind_second_switch_joins_that_switchs_subnet():
@@ -667,3 +684,372 @@ def test_topology_graph_and_link():
     assert r.status_code == 201
     graph = client.get("/api/topology", headers=h).json()
     assert len(graph["nodes"]) >= 2 and len(graph["edges"]) >= 1
+
+
+def test_smart_auto_keeps_manual_config():
+    h = _auth()
+    r = client.post("/api/devices", json={"name": "RMAN", "hostname": "RMAN", "device_type": "router"}, headers=h).json()
+    sw = client.post("/api/devices", json={"name": "SWMAN", "hostname": "SWMAN", "device_type": "switch"}, headers=h).json()
+    pc = client.post("/api/devices", json={"name": "PCMAN", "hostname": "PCMAN", "device_type": "pc"}, headers=h).json()
+    client.post("/api/topology/connections", json={"a_device_id": r["id"], "b_device_id": sw["id"]}, headers=h)
+    client.post("/api/topology/connections", json={"a_device_id": sw["id"], "b_device_id": pc["id"]}, headers=h)
+
+    manual = client.post("/api/manual-config/run", json={
+        "device_id": r["id"], "hostname": "RMAN",
+        "interfaces": [{"name": "GigabitEthernet0/0", "ip_address": "172.16.5.1",
+                        "subnet_mask": "255.255.255.0", "description": "my LAN"}],
+        "vlans": [], "dhcp": [], "deploy": False,
+    }, headers=h).json()["config"]
+
+    assert "172.16.5.1" in manual
+
+    # Smart Auto still configures the router, but keeps the hand-typed interface + IP
+    for _ in range(2):
+        res = client.post("/api/smart-config/auto", json={"scope": "all"}, headers=h).json()
+        cfg = next(x["config"] for x in res["results"] if x["device"] == "RMAN")
+        assert "auto-generated" in cfg
+        assert "interface GigabitEthernet0/0" in cfg
+        assert "ip address 172.16.5.1 255.255.255.0" in cfg
+        ips = [x["ip"] for x in client.get(f"/api/devices/{r['id']}", headers=h).json()["ip_addresses"]]
+        assert "172.16.5.1/24" in ips
+        # its only interface is manual, so RMAN is not in the Smart summary at all
+        assert "RMAN" not in [s["router"] for s in res["segments"]]
+
+    # it is also listed under Devices -> Edit -> Interface IP addresses ...
+    listed = [x for x in client.get(f"/api/devices/{r['id']}", headers=h).json()["ip_addresses"]
+              if x["role"] == "manual"]
+    assert ("GigabitEthernet0/0", "172.16.5.1/24") in [(x["interface"], x["ip"]) for x in listed]
+    # ... and saving that form unchanged keeps it a Manual Config interface
+    client.put(f"/api/devices/{r['id']}", json={"extra_ips": [
+        {"interface": x["interface"], "address": x["ip"]} for x in listed]}, headers=h)
+    res = client.post("/api/smart-config/auto", json={"scope": "all"}, headers=h).json()
+    assert "RMAN" not in [s["router"] for s in res["segments"]]
+    cfg = next(x["config"] for x in res["results"] if x["device"] == "RMAN")
+    assert "ip address 172.16.5.1 255.255.255.0" in cfg
+
+
+def test_smart_auto_keeps_manual_router_link_ips():
+    h = _auth()
+    ra = _device(h, "RLINKA", "router")
+    rb = _device(h, "RLINKB", "router")
+    client.post("/api/topology/connections", json={"a_device_id": ra["id"], "b_device_id": rb["id"]}, headers=h)
+    # first an auto run gives the link some /30 ...
+    client.post("/api/smart-config/auto", json={"scope": "wan"}, headers=h)
+    # ... then the admin types their own addresses on both ends
+    for dev, ip in ((ra, "10.77.0.2"), (rb, "10.77.0.1")):
+        client.post("/api/manual-config/run", json={
+            "device_id": dev["id"],
+            "interfaces": [{"name": "GigabitEthernet0/2", "ip_address": ip, "subnet_mask": "255.255.255.252"}],
+            "deploy": False,
+        }, headers=h)
+
+    for _ in range(2):
+        res = client.post("/api/smart-config/auto", json={"scope": "wan"}, headers=h).json()
+        cfgs = {x["device"]: x["config"] for x in res["results"]}
+        assert "ip address 10.77.0.2 255.255.255.252" in cfgs["RLINKA"]
+        assert "ip address 10.77.0.1 255.255.255.252" in cfgs["RLINKB"]
+        # the summary lists only what Smart Auto chose, never the hand-typed link
+        seg_ips = [l["ip"] for s in res["segments"] for l in s["links"]]
+        assert "10.77.0.2" not in seg_ips and "10.77.0.1" not in seg_ips
+
+    # a new router cabled in is configured and listed as usual
+    rc = _device(h, "RLINKC", "router")
+    client.post("/api/topology/connections", json={"a_device_id": ra["id"], "b_device_id": rc["id"]}, headers=h)
+    res = client.post("/api/smart-config/auto", json={"scope": "wan"}, headers=h).json()
+    segs = {s["router"]: s for s in res["segments"]}
+    assert [l["peer"] for l in segs["RLINKC"]["links"]] == ["RLINKA"]
+    assert "RLINKC" in [l["peer"] for l in segs["RLINKA"]["links"]]
+    assert "ip address 10.77.0.2 255.255.255.252" in next(
+        x["config"] for x in res["results"] if x["device"] == "RLINKA")
+
+
+def test_edit_form_lists_and_keeps_auto_interfaces():
+    h = _auth()
+    ra = _device(h, "REDITA", "router")
+    rb = _device(h, "REDITB", "router")
+    client.post("/api/topology/connections", json={"a_device_id": ra["id"], "b_device_id": rb["id"]}, headers=h)
+    client.post("/api/smart-config/auto", json={"scope": "wan"}, headers=h)
+
+    listed = [x for x in client.get(f"/api/devices/{ra['id']}", headers=h).json()["ip_addresses"]
+              if x["role"] != "mgmt"]
+    assert [x["role"] for x in listed] == ["link"]          # the auto link is in the form list
+    form = [{"interface": x["interface"], "address": x["ip"]} for x in listed]
+
+    # saving the form unchanged keeps it an automatic interface
+    client.put(f"/api/devices/{ra['id']}", json={"extra_ips": form}, headers=h)
+    after = client.get(f"/api/devices/{ra['id']}", headers=h).json()["ip_addresses"]
+    assert [(x["interface"], x["ip"], x["role"]) for x in after if x["role"] != "mgmt"] == \
+        [(x["interface"], x["ip"], "link") for x in listed]
+
+    # adding another port from the form works too
+    client.put(f"/api/devices/{ra['id']}", json={"extra_ips": form + [
+        {"interface": "GigabitEthernet0/4", "address": "192.168.77.1/24"}]}, headers=h)
+    after = {x["interface"]: x for x in client.get(f"/api/devices/{ra['id']}", headers=h).json()["ip_addresses"]}
+    assert after["GigabitEthernet0/4"]["role"] == "manual"
+    assert after[listed[0]["interface"]]["role"] == "link"
+
+    # removing a row with the X deletes that interface
+    client.put(f"/api/devices/{ra['id']}", json={"extra_ips": form}, headers=h)
+    names = [x["interface"] for x in client.get(f"/api/devices/{ra['id']}", headers=h).json()["ip_addresses"]]
+    assert "GigabitEthernet0/4" not in names
+
+
+def test_overwrite_manual_lets_smart_auto_take_over():
+    h = _auth()
+    r = _device(h, "ROVER", "router")
+    sw = _device(h, "SWOVER", "switch")
+    client.post("/api/topology/connections", json={"a_device_id": r["id"], "b_device_id": sw["id"]}, headers=h)
+    client.post("/api/manual-config/run", json={
+        "device_id": r["id"],
+        "interfaces": [{"name": "GigabitEthernet0/0", "ip_address": "172.20.0.1", "subnet_mask": "255.255.255.0"}],
+        "deploy": False,
+    }, headers=h)
+
+    # unticked (default): the hand-typed IP stays
+    res = client.post("/api/smart-config/auto", json={"scope": "lan"}, headers=h).json()
+    assert "ip address 172.20.0.1 255.255.255.0" in next(x["config"] for x in res["results"] if x["device"] == "ROVER")
+
+    # ticked: Smart Auto replaces it with its own address - nothing mixed
+    res = client.post("/api/smart-config/auto", json={"scope": "lan", "overwrite_manual": True}, headers=h).json()
+    cfg = next(x["config"] for x in res["results"] if x["device"] == "ROVER")
+    assert "172.20.0.1" not in cfg
+    seg = next(s for s in res["segments"] if s["router"] == "ROVER")
+    assert seg["lan"] and seg["lan"][0]["gateway"].startswith("192.168.")
+    roles = {x["role"] for x in client.get(f"/api/devices/{r['id']}", headers=h).json()["ip_addresses"]}
+    assert "manual" not in roles
+
+
+def test_router_and_switch_cables_are_always_access():
+    h = _auth()
+    r1, r2 = _device(h, "RCAB1", "router"), _device(h, "RCAB2", "router")
+    s1, s2 = _device(h, "SCAB1", "switch"), _device(h, "SCAB2", "switch")
+    pc = _device(h, "PCCAB", "pc")
+    for a, b in [(r1, r2), (s1, s2), (r1, s1)]:
+        c = client.post("/api/topology/connections", json={
+            "a_device_id": a["id"], "b_device_id": b["id"], "link_type": "trunk"}, headers=h).json()
+        assert c["link_type"] == "access"
+    # a cable to an endpoint keeps whatever was chosen
+    c = client.post("/api/topology/connections", json={
+        "a_device_id": s2["id"], "b_device_id": pc["id"], "link_type": "trunk"}, headers=h).json()
+    assert c["link_type"] == "trunk"
+
+
+def test_to_peer_only_on_double_cabled_links():
+    h = _auth()
+    ra, rb, rc = (_device(h, n, "router") for n in ("RPAR1", "RPAR2", "RPAR3"))
+    for a, b in [(ra, rb), (ra, rb), (ra, rc)]:            # two cables A-B, one cable A-C
+        client.post("/api/topology/connections", json={"a_device_id": a["id"], "b_device_id": b["id"]}, headers=h)
+    client.post("/api/smart-config/auto", json={"scope": "wan"}, headers=h)
+
+    rows = [x for x in client.get(f"/api/devices/{ra['id']}", headers=h).json()["ip_addresses"]
+            if x["role"] == "link"]
+    assert len(rows) == 3
+    assert sorted(x["parallel"] for x in rows) == [False, True, True]
+
+
+def test_ping_path_lists_only_routers_crossed():
+    h = _auth()
+    ra, rb, rc = (_device(h, n, "router") for n in ("RPATH1", "RPATH2", "RPATH3"))
+    sa, sc = _device(h, "SPATH1", "switch"), _device(h, "SPATH3", "switch")
+    pa1, pa2, pc = _device(h, "PPATH1", "pc"), _device(h, "PPATH2", "pc"), _device(h, "PPATH3", "pc")
+    for a, b in [(ra, rb), (rb, rc), (ra, sa), (sa, pa1), (sa, pa2), (rc, sc), (sc, pc)]:
+        client.post("/api/topology/connections", json={"a_device_id": a["id"], "b_device_id": b["id"]}, headers=h)
+    res = client.post("/api/smart-config/auto", json={"scope": "all"}, headers=h).json()
+    ip = {d["pc"]: d["ip"] for d in res["dhcp"]}
+
+    same = client.post("/api/monitoring/ping", json={"mode": "design", "source_ip": ip["PPATH1"],
+                                                     "target": ip["PPATH2"]}, headers=h).json()
+    assert same["ok"] and same.get("via") == []                     # same LAN, no router
+    far = client.post("/api/monitoring/ping", json={"mode": "design", "source_ip": ip["PPATH1"],
+                                                    "target": ip["PPATH3"]}, headers=h).json()
+    assert far["ok"] and far["via"] == ["RPATH1", "RPATH2", "RPATH3"]
+
+
+def test_packet_follows_the_cables():
+    h = _auth()
+    ra, rb, rx = (_device(h, n, "router") for n in ("RPKT1", "RPKT2", "RPKT3"))
+    sa, sb = _device(h, "SPKT1", "switch"), _device(h, "SPKT2", "switch")
+    pa, pa2, pb, lone = (_device(h, n, "pc") for n in ("PPKT1", "PPKT2", "PPKT3", "PPKT4"))
+    cable = {}
+    for a, b in [(pa, sa), (pa2, sa), (sa, ra), (ra, rb), (rb, sb), (sb, pb), (ra, rx)]:
+        cable[a["name"], b["name"]] = client.post("/api/topology/connections", json={
+            "a_device_id": a["id"], "b_device_id": b["id"]}, headers=h).json()["id"]
+    client.post("/api/smart-config/auto", json={"scope": "all"}, headers=h)
+
+    def send(a, b):
+        r = client.post("/api/monitoring/packet", headers=h, json={
+            "source_device_id": a["id"], "target_device_id": b["id"]})
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    # PC -> PC across two routers: every device in order, and the real cables
+    far = send(pa, pb)
+    assert far["ok"] and far["path"] == ["PPKT1", "SPKT1", "RPKT1", "RPKT2", "SPKT2", "PPKT3"]
+    assert [x["connection_id"] for x in far["hops"]] == [
+        cable["PPKT1", "SPKT1"], cable["SPKT1", "RPKT1"], cable["RPKT1", "RPKT2"],
+        cable["RPKT2", "SPKT2"], cable["SPKT2", "PPKT3"]]
+    # PC -> its own router, PC -> PC in one LAN, router -> PC, router -> router
+    assert send(pa, ra)["path"] == ["PPKT1", "SPKT1", "RPKT1"]
+    assert send(pa, pa2)["path"] == ["PPKT1", "SPKT1", "PPKT2"]
+    assert send(ra, pb)["path"] == ["RPKT1", "RPKT2", "SPKT2", "PPKT3"]
+    assert send(rx, rb)["path"] == ["RPKT3", "RPKT1", "RPKT2"]
+
+    # failures: no IP on the target (dropped at the first router), an uncabled
+    # host in the same subnet, and a switch
+    no_ip = send(pa, lone)
+    assert not no_ip["ok"] and no_ip["path"] == ["PPKT1", "SPKT1", "RPKT1"]
+    ip = client.get(f"/api/devices/{pa['id']}", headers=h).json()["mgmt_ip"]
+    client.put(f"/api/devices/{lone['id']}", json={"mgmt_ip": ip.rsplit(".", 1)[0] + ".200"}, headers=h)
+    uncabled = send(pa, lone)
+    assert not uncabled["ok"] and uncabled["hops"] == []
+    assert not send(pa, sb)["ok"]
+    assert client.post("/api/monitoring/packet", headers=h, json={
+        "source_device_id": pa["id"], "target_device_id": pa["id"]}).status_code == 400
+
+
+def test_device_info_for_the_hover_box():
+    h = _auth()
+    r, r2 = _device(h, "RTIP1", "router"), _device(h, "RTIP2", "router")
+    sw, pc, idle = _device(h, "STIP1", "switch"), _device(h, "PTIP1", "pc"), _device(h, "PTIP2", "pc")
+    for a, ai, b, bi in [(r, "Gi0/1", sw, "FastEthernet0/1"), (sw, "FastEthernet0/2", pc, "eth0"),
+                         (r, "GigabitEthernet0/5", r2, "GigabitEthernet0/5")]:
+        client.post("/api/topology/connections", headers=h, json={
+            "a_device_id": a["id"], "b_device_id": b["id"], "a_interface": ai, "b_interface": bi})
+    res = client.post("/api/smart-config/auto", json={"scope": "all"}, headers=h).json()
+    vlan = next(x["vlan_id"] for x in res["results"] if x["device"] == "STIP1")
+    ip = next(x["ip"] for x in res["dhcp"] if x["pc"] == "PTIP1")
+
+    def info(d):
+        data = client.get(f"/api/topology/devices/{d['id']}/info", headers=h).json()
+        return data, {p["port"]: p for p in data["ports"]}
+
+    data, ports = info(r)
+    assert (data["name"], data["hostname"], data["type"]) == ("RTIP1", "RTIP1", "router")
+    lan = next(p for p in ports.values() if p["vlan"])
+    assert lan["link"] == "Up" and lan["vlan"] == vlan and lan["ip"].endswith("/24")
+    assert any(p["ip"].startswith("10.") and p["ip"].endswith("/30") and p["vlan"] is None
+               for p in ports.values())
+    data, ports = info(sw)
+    assert data["spare_vlan"] == vlan
+    assert {n: (p["link"], p["vlan"], p["ip"]) for n, p in ports.items()} == {
+        "FastEthernet0/1": ("Up", vlan, None), "FastEthernet0/2": ("Up", vlan, None)}
+    _, ports = info(pc)
+    assert ports["eth0"] == {"port": "eth0", "link": "Up", "vlan": vlan, "ip": f"{ip}/24"}
+    _, ports = info(idle)
+    assert ports["eth0"] == {"port": "eth0", "link": "Down", "vlan": None, "ip": None}
+    assert client.get("/api/topology/devices/999999/info", headers=h).status_code == 404
+
+
+def test_vlan_ids_for_three_digit_networks():
+    h = _auth()
+    r = _device(h, "RVLAN1", "router")
+    client.put(f"/api/devices/{r['id']}", headers=h, json={"extra_ips": [
+        {"interface": "GigabitEthernet0/1", "address": "192.168.150.1/24"},
+        {"interface": "GigabitEthernet0/2", "address": "192.168.100.1/24"}]})
+    for n in ("SVLAN1", "SVLAN2"):
+        client.post("/api/topology/connections", headers=h, json={
+            "a_device_id": r["id"], "b_device_id": _device(h, n, "switch")["id"]})
+
+    def vlans():
+        return {v["subnet"]: v["vlan_id"]
+                for v in client.get(f"/api/devices/{r['id']}/vlans", headers=h).json()}
+
+    res = client.post("/api/smart-config/auto", json={"scope": "lan"}, headers=h).json()
+    got = vlans()
+    assert got["192.168.150.0/24"] == 150
+    # 100 already belongs to another LAN in this database -> the x10 number is used
+    assert got["192.168.100.0/24"] == 1000
+    by_net = {l["network"]: l["vlan_id"] for s in res["segments"] for l in s["lan"]}
+    assert 100 in by_net.values() and len(set(by_net.values())) == len(by_net)
+    # a run for the router links only keeps the very same numbers
+    client.post("/api/smart-config/auto", json={"scope": "wan"}, headers=h)
+    assert vlans() == got
+    # nothing is blocked: the admin may still type any VLAN by hand
+    sw = _device(h, "SVLAN3", "switch")
+    for vid in (100, 1000, 2000):
+        m = client.post("/api/manual-config/run", headers=h, json={
+            "device_id": sw["id"], "vlans": [{"vlan_id": vid, "name": f"V{vid}"}], "deploy": False})
+        assert m.status_code == 200 and f"vlan {vid}" in m.json()["config"]
+
+
+def test_api_docs_can_call_the_api_from_a_browser():
+    h = {**_auth(), "Sec-Fetch-Site": "same-origin"}
+    base = "http://localhost:8000"
+    for page in ("/docs", "/redoc"):
+        assert client.get("/api/devices", headers={**h, "Referer": base + page}).status_code == 200
+    # an old cached UI is still sent back to the login page
+    old = client.get("/api/devices", headers={**h, "Referer": base + "/devices"})
+    assert old.status_code == 401 and old.headers["clear-site-data"] == '"cache"'
+    assert client.get("/api/devices", headers={**h, "X-UI-Build": "1"}).status_code == 200
+
+
+def test_network_and_broadcast_addresses_are_refused():
+    h = _auth()
+    r = _device(h, "RBADIP", "router")
+    url = f"/api/devices/{r['id']}"
+
+    def save(addr):
+        return client.put(url, headers=h, json={"extra_ips": [{"interface": "GigabitEthernet0/1", "address": addr}]})
+
+    for bad in ("10.91.1.0/30", "10.91.1.3/30", "192.168.91.0", "192.168.91.255/24"):
+        res = save(bad)
+        assert res.status_code == 400 and "cannot use it" in res.json()["detail"], bad
+    assert save("not-an-ip").status_code == 400
+    assert client.get(url, headers=h).json()["ip_addresses"] == []
+    for good in ("10.91.1.1/30", "10.91.1.0/31", "192.168.91.254/24"):
+        assert save(good).status_code == 200, good
+
+    def manual(ip, mask):
+        return client.post("/api/manual-config/run", headers=h, json={"device_id": r["id"], "deploy": False, "interfaces": [
+            {"name": "GigabitEthernet0/2", "ip_address": ip, "subnet_mask": mask}]})
+
+    assert manual("10.92.1.0", "255.255.255.252").status_code == 400
+    assert manual("10.92.1.2", "255.255.255.252").status_code == 200
+
+
+def test_smart_auto_repairs_an_unusable_link_address():
+    from database import SessionLocal
+    from models import Interface
+    h = _auth()
+    ra, rb = _device(h, "RFIX1", "router"), _device(h, "RFIX2", "router")
+    client.post("/api/topology/connections", headers=h, json={
+        "a_device_id": ra["id"], "b_device_id": rb["id"],
+        "a_interface": "GigabitEthernet0/5", "b_interface": "GigabitEthernet0/5"})
+    db = SessionLocal()      # what an older version could leave behind
+    for dev, ip in ((ra, "10.93.1.0"), (rb, "10.93.1.1")):
+        db.add(Interface(device_id=dev["id"], name="GigabitEthernet0/5", ip_address=ip, mode="routed",
+                         subnet_mask="255.255.255.252", description="link to peer", enabled=True))
+    db.commit(); db.close()
+    ping = client.post("/api/monitoring/ping", headers=h, json={
+        "mode": "design", "source_ip": "10.93.1.1", "target": "10.93.1.0"}).json()
+    assert not ping["ok"] and "network address" in ping["reason"]
+    for _ in range(2):
+        cfg = {x["device"]: x["config"] for x in client.post(
+            "/api/smart-config/auto", json={"scope": "wan"}, headers=h).json()["results"]}
+        assert "ip address 10.93.1.2 255.255.255.252" in cfg["RFIX1"]
+        assert "ip address 10.93.1.1 255.255.255.252" in cfg["RFIX2"]      # the good end is kept
+    assert client.post("/api/monitoring/ping", headers=h, json={
+        "mode": "design", "source_ip": "10.93.1.1", "target": "10.93.1.2"}).json()["ok"]
+
+
+def test_every_cabled_switch_port_is_in_the_vlan():
+    h = _auth()
+    r, sw, pr = _device(h, "RGIG", "router"), _device(h, "SGIG", "switch"), _device(h, "PGIG", "printer")
+    for a, ai, b, bi in [(sw, "FastEthernet0/1", r, "GigabitEthernet0/1"), (sw, "GigabitEthernet0/1", pr, "eth0")]:
+        client.post("/api/topology/connections", headers=h, json={
+            "a_device_id": a["id"], "b_device_id": b["id"], "a_interface": ai, "b_interface": bi})
+    res = client.post("/api/smart-config/auto", json={"scope": "lan"}, headers=h).json()
+    row = next(x for x in res["results"] if x["device"] == "SGIG")
+    block = row["config"].split("interface GigabitEthernet0/1\n")[1].split("!")[0]
+    assert f"switchport access vlan {row['vlan_id']}" in block and "portfast" in block
+    ports = client.get(f"/api/topology/devices/{pr['id']}/info", headers=h).json()["ports"]
+    assert ports[0]["vlan"] == row["vlan_id"]
+
+    # a router uplink on a Gigabit port is written once, as the uplink
+    r2, s2 = _device(h, "RGIG2", "router"), _device(h, "SGIG2", "switch")
+    client.post("/api/topology/connections", headers=h, json={
+        "a_device_id": s2["id"], "b_device_id": r2["id"],
+        "a_interface": "GigabitEthernet0/1", "b_interface": "GigabitEthernet0/1"})
+    res = client.post("/api/smart-config/auto", json={"scope": "lan"}, headers=h).json()
+    cfg = next(x["config"] for x in res["results"] if x["device"] == "SGIG2")
+    assert cfg.count("interface GigabitEthernet0/1\n") == 1 and "Uplink to RGIG2" in cfg

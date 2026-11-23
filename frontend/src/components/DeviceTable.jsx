@@ -1,10 +1,16 @@
 const icon = { router: '🔀', switch: '🔗', pc: '💻', ip_phone: '📞', printer: '🖨️', server: '🗄️' }
 const typeLabel = { router: 'Router', switch: 'Switch', pc: 'PC', ip_phone: 'IP Phone', printer: 'Printer', server: 'Server' }
 
-// router-to-router link -> orange ; an endpoint's own address -> blue ;
-// everything else (a router's LAN gateway / management IP) -> green
-function ipColor(device, role) {
-  if (role === 'link') return 'var(--amber)'
+// Class A = first octet 1-126 (this project uses 10.0.0.0/8 for router links)
+function isClassA(ip) {
+  const first = parseInt(String(ip || '').split('.')[0], 10)
+  return first >= 1 && first <= 126
+}
+
+// router-to-router link or any Class A address -> orange ; an endpoint's own
+// address -> blue ; everything else (a router's LAN gateway / management IP) -> green
+function ipColor(device, role, ip) {
+  if (role === 'link' || isClassA(ip)) return 'var(--amber)'
   if (['pc', 'ip_phone', 'printer', 'server'].includes(device.device_type)) return 'var(--accent)'
   return 'var(--green)'
 }
@@ -20,9 +26,9 @@ function IpList({ device }) {
     <div className="grid" style={{ gap: 2 }}>
       {ips.map((x, i) => (
         <div key={i} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-          <span style={{ color: ipColor(device, x.role), fontWeight: 600 }}>{x.ip}</span>
+          <span style={{ color: ipColor(device, x.role, x.ip), fontWeight: 600 }}>{x.ip}</span>
           {x.interface !== 'mgmt' && <span className="muted"> · {x.interface}</span>}
-          {x.role === 'link' && <span className="muted"> (to peer)</span>}
+          {x.parallel && <span className="muted"> (to peer)</span>}
         </div>
       ))}
     </div>
