@@ -157,3 +157,8 @@ pre.config {
 
 /* Hide interfaces: the names (and ✕) on the topology cables */
 .react-flow.hide-interfaces .cable-label { display: none !important; }
+
+/* round status light (ping result on the Devices page) */
+.status-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--muted); }
+.status-dot.online { background: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, .7); }
+.status-dot.offline { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, .7); }

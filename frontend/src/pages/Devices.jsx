@@ -11,7 +11,13 @@ export default function Devices() {
   const [filter, setFilter] = useState('')
   const [config, setConfig] = useState(null)
   const [dhcp, setDhcp] = useState(null)   // { pc, scopes, vlanId, result, err }
-  const [msg, setMsg] = useState('')
+  const [msg, setMsgText] = useState('')
+  const [msgStatus, setMsgStatus] = useState(null)   // online | offline | ... -> the dot beside it
+  const [msgDevice, setMsgDevice] = useState(null)   // the pinged device the message is about
+  const attempt = useRef(0)                          // a ping answer after its refresh is dropped
+  const setMsg = (text, status = null, device = null) => {
+    setMsgText(text); setMsgStatus(status); setMsgDevice(device)
+  }
 
   // Config / DHCP open below the table: bring the panel into view on every click
   const panels = { config: useRef(null), dhcp: useRef(null) }
@@ -46,12 +52,15 @@ export default function Devices() {
   const remove = async (d) => {
     if (!confirm(`Delete ${d.name}?`)) return
     await DeviceAPI.remove(d.id); await load()
+    if (msgDevice?.id === d.id) setMsg('')
   }
 
   const ping = async (d) => {
-    setMsg(`Checking ${d.name}…`)
+    const mine = ++attempt.current
+    setMsg(`Checking ${d.name}…`, null, d)
+    window.scrollTo({ top: 0, behavior: 'smooth' })   // the answer is shown up there
     const r = await DeviceAPI.status(d.id)
-    setMsg(`${d.name} is ${r.data.status}`)
+    if (mine === attempt.current) setMsg(`${d.name} is ${r.data.status}`, r.data.status, d)
     await load()
   }
 
@@ -96,7 +105,16 @@ export default function Devices() {
           <button className="primary" onClick={() => setEditing({})}>+ Add device</button>
         </div>
       </div>
-      {msg && <div className="muted">{msg}</div>}
+      {msg && (
+        <div className="muted row" style={{ gap: 8 }}>
+          {msg}{msgStatus && <span className={`status-dot ${msgStatus}`} />}
+          {msgDevice && (
+            <button style={{ marginLeft: 'auto', padding: '2px 8px', fontSize: 12 }}
+              title="Clear this message" aria-label="Clear this message"
+              onClick={() => { attempt.current += 1; setMsg('') }}>🔄</button>
+          )}
+        </div>
+      )}
 
       {editing && (
         <DeviceForm initial={editing.id ? editing : null}
