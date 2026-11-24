@@ -1,244 +1,274 @@
-# Smart Network Automation & Configuration Management Platform — MVP
+# ⚡ Smart Network Automation & Configuration Management Platform
 
 **🇬🇧 English** · [🇦🇱 Shqip](README.sq.md)
 
-A web platform that **manages a Cisco network topology, generates Cisco IOS
-configuration automatically, and deploys it over SSH** — built for the master's
-thesis with **Python / FastAPI, React, Jinja2, Netmiko and Ansible**.
+Draw a Cisco network in the browser, press one button, and get the complete
+**Cisco IOS configuration** for every router and switch: addresses, VLANs, DHCP,
+OSPF / BGP and NAT. Then test it with an animated packet, without any lab.
 
-This repository is the **MVP** (section 21 of the requirements): the fully
-functional subset delivered for the thesis. The wider vision (full ACL, STP,
-config backup/restore, advanced monitoring & security) is documented as future
-work.
+Built as a master's thesis with Python / FastAPI, React, Jinja2, Netmiko and Ansible.
+This repository is the **MVP** (minimum viable product) of the thesis.
 
----
+![Network topology with a packet on its way](documentation/screenshots/topology.png)
 
-## Table of contents
+**How it works, in three steps**
 
-1. [What it does](#1-what-it-does)
-2. [Key design decisions](#2-key-design-decisions)
-3. [How it runs (one URL)](#3-how-it-runs-one-url)
-4. [Tech stack](#4-tech-stack)
-5. [Quick start](#5-quick-start)
-6. [Smart Auto Configuration](#6-smart-auto-configuration)
-7. [Manual Configuration](#7-manual-configuration)
-8. [Reachability / ping testing](#8-reachability--ping-testing)
-9. [Deploying to a real lab](#9-deploying-to-a-real-lab)
-10. [Testing & the thesis experiment](#10-testing--the-thesis-experiment)
-11. [Database schema](#11-database-schema)
-12. [Project layout](#12-project-layout)
+1. **Draw** – add devices and connect them with cables.
+2. **Configure** – press a button in *Smart Auto Config* (or type it yourself in *Manual Config*).
+3. **Test** – send a packet from one device to another and watch it travel.
 
 ---
 
-## 1. What it does
+## Contents
 
-| Module | Scope |
-|---|---|
-| **Authentication** | Sign in / **Sign up** (self-registration, only reachable from the sign-in page) / logout · JWT · `admin` role · show/hide-password toggle |
-| **Device Management** | Add / edit / delete / list · 6 device types (Router, Switch, PC, IP Phone, Printer, Server) · per-interface IP entry · server roles · SSH reachability check |
-| **Network Topology** | React Flow canvas: drag & drop, cable devices port-to-port (a cable auto-routes to whichever side faces the other device), delete links, live online/offline status, colour-coded IPs (green = LAN/management, orange = router-to-router, blue = an endpoint's own address) |
-| **Smart Auto Configuration** | One click, no forms: reads the topology and generates subnets → VLANs → gateways → DHCP → routing (OSPF / BGP / both) → optional NAT → Cisco IOS → Ansible artifacts → optional SSH deploy → DB |
-| **Manual Configuration** | Router/switch only: hostname, interfaces, IP/mask, VLANs (switch only), DHCP pools, **OSPF**, **BGP** → Cisco IOS + optional SSH deploy |
-| **Dashboard** | Device counts by type, online/offline, VLAN count, recent deploys |
-| **Logging** | Config / deploy / auth / system logs, filterable |
-| **Thesis experiment** | `tests/compare_manual_vs_auto.py` — time, admin inputs and errors: manual CLI vs. the platform |
-
-Seed data on first run: `admin / admin123` + demo devices **R1, SW1, PC1, PC2**.
-
----
-
-## 2. Key design decisions
-
-These are the rules the configuration engine follows (built up over the thesis
-work):
-
-**Devices**
-- A **switch is pure Layer 2** — it never receives an IP or management IP. It may
-  keep SSH credentials so the generated config shows the SSH management block
-  (`username`, `line vty`, `transport input ssh`, `login local`) — no IP is added.
-- **PC / IP Phone / Printer / Server** are endpoints. PC, phone and printer get
-  their address by DHCP; a **server keeps a static low address** and its roles
-  are wired into the router.
-- **Server roles** (`DHCP, DNS, Web, Syslog, NTP, Monitoring`) feed the router
-  config: DNS → `dns-server`, Syslog → `logging host`, NTP → `ntp server`,
-  DHCP → the router becomes a relay (`ip helper-address`) instead of hosting the
-  pool.
-- A device shows **online** as soon as it is cabled in the topology.
-- A router's physical ports are all **GigabitEthernet0/0 – 0/5** (6 in total,
-  3 drawn on top / 3 on the bottom of the topology node) — no Serial ports.
-
-**Addressing**
-- **Local networks** use Class C — `192.168.1.0/24 … 192.168.255.0/24`.
-- **Router-to-router links** use Class A — `10.0.0.0/8`, always a **/30
-  (255.255.255.252)**, `.1` / `.2`. A router can have **several links to the
-  same peer router** (redundant / load-sharing) — each gets its own interface
-  and its own /30, and re-running never merges or moves them.
-- If the admin typed a Management IP on a router, that IP is kept as the **LAN
-  gateway**; a typed `10.x` IP is used verbatim on the router-to-router link
-  (peer takes the other /30 address).
-- A router can carry **several hand-typed LAN gateways** at once (`Devices →
-  Edit → Interface IP addresses`) — each switch cabled to it consumes the next
-  unused one, in order; the rest wait untouched for the next switch instead of
-  being deleted.
-- Every PC/phone/printer/server joins the segment of the **nearest switch that
-  has a router uplink**, even when two uplinked switches are also cabled to
-  each other (an L2 loop) — so a host never ends up on the wrong subnet just
-  because its switch has a second path back to the router.
-- **DHCP is sequential and stable**: PCs get `.2, .3, .4 …` in hostname order;
-  re-running after an IP change re-numbers cleanly with no stale leases.
-- **VLAN id scheme**: `192.168.X.0/24` → VLAN `X × 10` (deterministic, globally
-  unique across the whole topology), so the id matches on the router, the switch
-  and DHCP.
-- Stray/duplicate cables (leftovers from re-cabling) are cleaned up
-  automatically — except a genuine second link between two routers, which is
-  never treated as a duplicate.
-
-**Configuration**
-- **VLANs live only on the switch** — the router config never emits `vlan` or
-  `switchport` commands.
-- **Routing options**: OSPF (single area 0, passive LAN interfaces), eBGP (one
-  private AS per router, `65000 + id`), or **both at once**.
-- **NAT overload (PAT)** is optional and **router-only**: LANs = inside, first
-  router-to-router link = outside.
-- Templates render with Jinja2 (`trim_blocks`, `lstrip_blocks`,
-  `StrictUndefined`); a cleaner collapses stray blank lines.
-
-**Deployment**
-- **Netmiko / SSH is the primary deploy path** (works on Windows).
-- **Ansible** inventory + playbook (`cisco.ios.ios_config`) are written for every
-  deploy so the workflow can be demonstrated / run from Linux/WSL.
-- `deploy: false` (the UI default) generates and saves the config without
-  touching any device.
+1. [Installation](#1-installation)
+2. [Your first network in 5 minutes](#2-your-first-network-in-5-minutes)
+3. [The pages](#3-the-pages)
+4. [Smart Auto Config](#4-smart-auto-config)
+5. [Manual Config](#5-manual-config)
+6. [Testing the network](#6-testing-the-network)
+7. [Rules the platform follows](#7-rules-the-platform-follows)
+8. [Using the configuration on real devices](#8-using-the-configuration-on-real-devices)
+9. [Architecture](#9-architecture)
+10. [Database](#10-database)
+11. [API](#11-api)
+12. [Tests and the thesis experiment](#12-tests-and-the-thesis-experiment)
+13. [Settings and security](#13-settings-and-security)
+14. [Limitations and future work](#14-limitations-and-future-work)
 
 ---
 
-## 3. How it runs (one URL)
+## 1. Installation
 
-The FastAPI server also serves the built React app, so the whole platform is a
-single instant URL — **http://localhost:8000** — with no dev server to keep open.
+**You need:** Windows, [Python 3.11, 3.12 or 3.13](https://www.python.org/downloads/) (3.14 and newer
+do not work yet) and [Node.js 18+](https://nodejs.org/). Put the project in a short path, such as the Desktop.
 
-```
-browser ──► http://localhost:8000
-              │
-              ├── /              → React SPA (frontend/dist)
-              └── /api/*         → FastAPI (auth, devices, topology,
-                                   smart-config, manual-config, monitoring, logs)
-                                        │
-                                        ├── SQLite (backend/database/network.db)
-                                        ├── Jinja2 → Cisco IOS
-                                        ├── Netmiko → SSH to routers
-                                        └── automation/generated/*.{cfg,yml}
-```
-
-On Windows, `start.bat` builds the frontend once, starts the server hidden
-(`server.vbs`) and opens the browser. `stop.bat` stops it.
-
----
-
-## 4. Tech stack
-
-- **Backend:** Python 3.11+, FastAPI, SQLAlchemy 2, SQLite, Pydantic v2,
-  python-jose (JWT), passlib (`pbkdf2_sha256`)
-- **Automation:** Jinja2 → Cisco IOS · **Netmiko** for SSH · generated
-  **Ansible** inventory + playbooks
-- **Frontend:** React 18 + Vite, React Router, React Flow, Axios
-- **Lab:** Cisco Packet Tracer / GNS3 / EVE-NG (or the built-in design-mode
-  reachability check — no lab required)
-
----
-
-## 5. Quick start
-
-### Windows (one click)
-
-```
-double-click start.bat      →  builds once, starts the server, opens http://localhost:8000
-double-click stop.bat       →  stops the server
-```
-
-### Manual / development
-
-**Backend**
+### First time only
 
 ```powershell
-cd backend
+git clone https://github.com/ArgjendEj/Smart-Network-Automation.git
+cd Smart-Network-Automation\backend
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-copy .env.example .env          # optional, edit secrets
-python -m uvicorn main:app --reload --port 8000
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-API docs: http://localhost:8000/docs
+### Every time
 
-**Frontend**
+| To | Do this |
+|---|---|
+| **Start** | double-click `start.bat`. It opens **http://localhost:8000** (the first start also builds the interface, about 30 seconds) |
+| **Stop** | double-click `stop.bat` |
+
+Sign in with **`admin` / `admin123`**. On the first start the database is created with
+four demo devices: R1, SW1, PC1 and PC2.
+
+### For development
 
 ```powershell
+# backend, restarts itself when the code changes
+cd backend
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
+
+# frontend, in a second terminal: http://localhost:5173
 cd frontend
 npm install
-npm run dev      # http://localhost:5173, proxies /api to :8000
-# or:
-npm run build    # output served by the backend at http://localhost:8000
+npm run dev
 ```
 
+### If something does not work
+
+| Problem | Solution |
+|---|---|
+| `start.bat` opens a page that cannot be reached | `backend\.venv` is missing: run the *First time only* steps |
+| The page still looks old | press **Ctrl+F5** |
+| Changed the frontend code, nothing happens | `cd frontend`, then `npm run build` |
+| Changed the backend code, nothing happens | `stop.bat`, then `start.bat` |
+| `pip` ends with *No such file or directory* and *Long Path* | the folder path is too long: move the project closer to `C:\` |
+| `pip` cannot find a version of `pyyaml` | Python is too new: install 3.13 |
+| Port 8000 is already in use | `stop.bat` ends whatever is running on it |
+
 ---
 
-## 6. Smart Auto Configuration
+## 2. Your first network in 5 minutes
 
-**Devices → Topology**: place devices, cable them. **Smart Auto Config**: pick a
-routing protocol (OSPF / BGP / both), optionally tick NAT, then press one of:
+Uses the four demo devices of a new installation.
 
-| Button | Scope | Result |
+1. **Network Topology** – drag a cable from a blue dot of one device to a blue dot of another:
+   `R1` → `SW1`, `SW1` → `PC1`, `SW1` → `PC2`. For the PCs the app asks *Trunk link?*: choose **Cancel** (access).
+2. **Smart Auto Config** – choose **OSPF** and press **🏠 Configure local networks + DHCP**.
+
+   ```
+   R1 · router-id 1.1.1.1 · OSPF area 0
+   LAN GigabitEthernet0/0 → 192.168.10.0/24 · gateway 192.168.10.2 · VLAN 100
+   PC1 192.168.10.3      PC2 192.168.10.4
+   ```
+3. **Network Topology** – under the map, in **Packet test**, choose Source `PC1`, Destination `PC2`, press **Send**.
+   The envelope travels PC1 → SW1 → PC2 and comes back with **✓ Successful**.
+4. **Devices** – press **Config** next to `R1` or `SW1` to read the generated Cisco IOS.
+
+---
+
+## 3. The pages
+
+| Page | What you can do |
+|---|---|
+| **Dashboard** | Number of devices, online / offline, VLANs · all addresses (*Network Addressing*) · recent activity |
+| **Network Topology** | Draw the network · Packet test · Ping test |
+| **Devices** | Add, edit, delete and search devices · **Ping** (online / offline) · **Config** (generated IOS) · **DHCP** (address for a PC) |
+| **Smart Auto Config** | Configure the whole network with one button |
+| **Manual Config** | Configure one router or switch yourself |
+| **Logs** | Everything that happened, filtered by category |
+
+Device types: **Router, Switch, PC, IP Phone, Printer, Server**.
+The **☀️ Light / 🌙 Dark** button at the top changes the theme.
+
+### On the topology map
+
+| Action | Result |
+|---|---|
+| Drag a device | moves it |
+| Drag from dot to dot | adds a cable |
+| Rest the mouse on a device for 1 second | shows its interfaces, link, VLAN and IP |
+| Double-click a device | opens *Edit device* |
+| Double-click a cable (or its ✕) | deletes it |
+| **Hide / Show Interfaces** | hides or shows the port names on the cables |
+
+Blue cable = **access**, orange cable = **trunk**. A cable between routers and / or switches is always access.
+
+![Device information on the map](documentation/screenshots/device-info.png)
+
+### Colours of the IP addresses (Devices and Dashboard)
+
+| Colour | Meaning |
+|---|---|
+| 🟢 Green | LAN gateway or management address |
+| 🟠 Orange | router-to-router link, or any Class A address (`10.x.x.x`) |
+| 🔵 Blue | address of a PC, phone, printer or server |
+
+**(to peer)** appears when two devices are connected with two or more cables.
+
+![Devices page](documentation/screenshots/devices.png)
+
+---
+
+## 4. Smart Auto Config
+
+Choose a routing protocol (**OSPF**, **BGP** or **both**), then press one of the buttons:
+
+| Button | What it configures |
+|---|---|
+| 🏠 **Configure local networks + DHCP** | a subnet, gateway, VLAN and DHCP pool for every router ↔ switch / host cable, and an address for every host |
+| 🔗 **Configure router-to-router links** | a `/30` on every router ↔ router cable, plus routing |
+| **Both** | everything |
+
+| Option | Meaning |
+|---|---|
+| **Enable NAT overload (PAT)** | the LANs are *inside*, the first router-to-router link is *outside* |
+| **Replace manual configurations with Smart Auto** | also replaces the router addresses you typed yourself (see below) |
+
+![Smart Auto result](documentation/screenshots/smart-auto.png)
+
+### What happens to what you typed yourself
+
+| You typed it in | Smart Auto | Shown in the result |
 |---|---|---|
-| 🏠 **Configure local networks + DHCP** | `lan` | each router↔switch/PC link gets a `192.168.x.0/24`, a DHCP pool, a VLAN; every PC/phone/printer gets an address; servers keep a static one; each switch gets its VLAN |
-| 🔗 **Configure router-to-router links** | `wan` | each router↔router link gets a matching `/30` from `10.0.0.0/8` + the chosen routing |
-| **Both** | `all` | LAN + WAN together |
+| *Manual Config*: router interface + IP | keeps it | no |
+| *Devices → Edit*: router interface IP | keeps it | yes |
+| *Manual Config*: routing, DHCP, switch ports and VLANs | generates it again | yes |
 
-Pipeline (`services/auto_topology_service.py`):
+Tick **Replace manual configurations** to let Smart Auto choose the router addresses as well.
+Router-to-router links always become a `/30`.
 
-1. **Read the graph** — `Connection` rows → who is wired to whom.
-2. **Assign addressing** — LAN `/24` per segment (respecting a typed Management
-   IP), WAN `/30` per router link, deterministic VLAN ids, sequential DHCP.
-3. **Generate** — `config_generator.py` + `automation/templates/router_auto.j2`
-   / `switch_auto.j2`: LAN interfaces + DHCP (or relay), WAN `/30` interfaces,
-   OSPF / BGP, optional NAT, server-role lines (DNS / Syslog / NTP).
-4. **Persist & deploy** — VLAN / Interface / Routing rows to SQLite; Netmiko
-   push if requested; Ansible artifacts always written; every step logged.
+Smart Auto **generates and saves** the configuration. It does not connect to any device;
+see [section 8](#8-using-the-configuration-on-real-devices).
 
 ---
 
-## 7. Manual Configuration
+## 5. Manual Config
 
-Router or switch only. The form adapts to the type:
+Choose a router or a switch, fill in only what you need and press **Generate configuration**.
 
-- **Switch** — Layer 2 only: interfaces (mode/VLAN, no IP), a VLAN database, no
-  DHCP, no routing.
-- **Router** — interfaces with IP/mask, DHCP pools, **OSPF** (process id,
-  router-id, `network` statements), **BGP** (AS number, advertised networks,
-  neighbours). No VLAN / switchport commands are ever emitted.
+| Device | You can set |
+|---|---|
+| **Router** | hostname · interfaces (IP, mask, up / down) · DHCP pools · OSPF · BGP |
+| **Switch** | hostname · ports (access / trunk, VLAN) · VLANs. No IP address: a switch is Layer 2 here |
 
-Generates Cisco IOS, saves it, optionally deploys over SSH.
-
----
-
-## 8. Reachability / ping testing
-
-`POST /api/monitoring/ping` — three modes:
-
-- **design** *(no lab needed)* — validates reachability from the topology + IP
-  plan: same subnet → direct; different subnets → must be routed; an IP nobody
-  owns is never "successful".
-- **server** — a real ICMP ping from the host running the platform.
-- **device** — SSH into a router and run `ping` there.
-
-`GET /api/monitoring/endpoints` lists every IP actually assigned in the design —
-the only valid ping sources/targets.
+Tick **Deploy over SSH** to send it to a real router as well.
+A network or broadcast address (for example `10.1.1.0/30`) is refused, with the addresses you can use instead.
 
 ---
 
-## 9. Deploying to a real lab
+## 6. Testing the network
 
-1. Build a topology with a router + switch and enable SSH on the router:
+| Test | Where | What it does |
+|---|---|---|
+| **✉️ Packet test** | Network Topology | An envelope travels along the cables, device by device, and returns **✓ Successful** or stops with **✕ Failed** and the reason. Choose the devices from the lists or with *Pick on the map* |
+| **Ping test** | Network Topology, Devices | Enter two IP addresses: shows whether they reach each other and through which routers |
+| **Ping** button | Devices | 🟢 online or 🔴 offline: the device answers on port 22 (SSH) or has a cable in the topology |
+
+**Refresh** clears a test so you can start the next one.
+
+> **Good to know:** Packet test and Ping test calculate the answer from the **cables and IP
+> addresses**. They send nothing to real devices, and they do not check VLANs or whether
+> OSPF / BGP is really running. For that, test in Packet Tracer, GNS3 or on real devices.
+
+---
+
+## 7. Rules the platform follows
+
+### Addresses
+
+| Network | Range | Notes |
+|---|---|---|
+| Local network | `192.168.X.0/24` | the gateway is `.1`, unless you typed another one |
+| Router ↔ router | `10.0.0.0/8`, always `/30` | two cables between the same routers get two separate networks |
+| Hosts | addresses right after the gateway | servers first, then PCs, phones and printers by hostname; running it again gives the same addresses |
+
+### VLANs
+
+| Network | VLAN |
+|---|---|
+| `192.168.X.0/24`, X below 100 | X × 10 (`192.168.1.0` → 10, `192.168.20.0` → 200) |
+| `192.168.X.0/24`, X from 100 | X (`192.168.100.0` → 100); X × 10 if that number is already taken |
+| Any other network | 100, 110, 120 … |
+
+Every network has its own VLAN, the same on the router, the switch and in DHCP. All cabled
+ports of a switch are in the VLAN of its LAN.
+
+### Devices
+
+- **Router:** six ports, `GigabitEthernet0/0` – `0/5`. Its configuration has no `vlan` or `switchport` commands.
+- **Switch:** Layer 2 only, without an IP address. It may keep SSH credentials for the SSH block of its configuration.
+- **PC, IP phone, printer:** get an address by DHCP. **Server:** keeps a fixed one.
+- **Hosts** belong to the nearest switch that is cabled to a router.
+
+### Routing and server roles
+
+- **OSPF:** area 0, LAN interfaces are passive. **BGP:** one private AS per router, `65000 + device id`.
+
+| Role of a server | Added to the routers |
+|---|---|
+| DNS | `dns-server` in the DHCP pools |
+| DHCP | `ip helper-address` instead of a local pool |
+| NTP | `ntp server` |
+| Syslog | `logging host` |
+
+Web and Monitoring are only labels.
+
+---
+
+## 8. Using the configuration on real devices
+
+### Packet Tracer (or any console): copy and paste
+
+1. **Devices → Config** next to the router or switch; copy the text.
+2. On the device: `enable`, `configure terminal`, paste.
+
+Packet Tracer cannot be reached over SSH from your computer, so copy and paste is the way there.
+
+### GNS3, EVE-NG or real routers: SSH
+
+1. Give the router an address your computer can reach, and enable SSH:
 
    ```
    hostname R1
@@ -249,98 +279,187 @@ the only valid ping sources/targets.
    line vty 0 4
     transport input ssh
     login local
-   interface g0/0
-    ip address 192.168.10.2 255.255.255.0
-    no shutdown
    ```
 
-2. **Devices → Edit** the router → set Management IP + SSH username / password /
-   enable secret.
-3. **Smart Auto Config** or **Manual Config** → tick **Deploy over SSH** → run.
-4. To run the generated **Ansible** playbook instead (Linux/WSL with `ansible` +
-   `cisco.ios`):
+2. **Devices → Edit:** enter the Management IP, SSH username, password and enable secret.
+3. **Manual Config:** tick **Deploy over SSH**. Only what you enter in that form is sent.
 
-   ```bash
-   ansible-galaxy collection install cisco.ios
-   ansible-playbook -i backend/automation/generated/R1-*-*.inventory.yml \
-                    backend/automation/generated/R1-*-*.playbook.yml
-   ```
+SSH deployment needs a management IP, so it works for **routers**. Set `DEPLOY_DRY_RUN=true`
+in `backend/.env` to try it without sending anything.
+
+### Ansible
+
+Every SSH deployment also writes a `.cfg`, an inventory and a playbook to
+`backend/automation/generated/`. To run them from Linux or WSL:
+
+```bash
+ansible-galaxy collection install cisco.ios
+cd backend/automation/generated
+ansible-playbook -i <name>.inventory.yml <name>.playbook.yml
+```
 
 ---
 
-## 10. Testing & the thesis experiment
+## 9. Architecture
+
+One server, one address: FastAPI also serves the React interface.
+
+```
+browser ──► http://localhost:8000
+              ├── /        React interface (frontend/dist)
+              ├── /docs    API documentation
+              └── /api/*   FastAPI
+                             ├── SQLite    backend/database/network.db
+                             ├── Jinja2    templates → Cisco IOS
+                             ├── Netmiko   SSH to routers
+                             └── Ansible   inventory + playbook files
+```
+
+| Part | Technology |
+|---|---|
+| Backend | Python 3.11 – 3.13, FastAPI, SQLAlchemy 2, Pydantic 2, SQLite, JWT |
+| Automation | Jinja2, Netmiko, generated Ansible files |
+| Frontend | React 18, Vite, React Router, React Flow, Axios |
+
+```
+start.bat · stop.bat · server.vbs     start / stop on Windows
+
+backend/
+  main.py  config.py  database.py  models.py  schemas.py  seed.py  auth_utils.py
+  routers/              API endpoints, one file per page
+  services/
+    auto_topology_service.py     Smart Auto: topology → addresses, VLANs, routing
+    manual_config_service.py     Manual Config
+    config_generator.py          renders the Cisco IOS text
+    monitoring_service.py        Packet test and Ping test
+    topology_service.py          map, cables, device information
+    device_service.py            devices and their addresses
+    dhcp_service.py              addresses for single hosts
+    deployment_service.py        SSH (Netmiko) and Ansible files
+    smart_config_service.py      department planner (API only)
+    subnet_calculator.py  logging_service.py
+  automation/templates/          Jinja2 templates (*.j2)
+  tests/                         46 automated tests
+
+frontend/src/
+  pages/                Login, Register, Dashboard, Topology, Devices,
+                        SmartConfiguration, ManualConfiguration, Logs
+  components/           TopologyCanvas, DeviceNode, ConnectionLine, DeviceTooltip,
+                        PacketTest, PacketEnvelope, PingTest, DeviceForm,
+                        DeviceTable, ThemeToggle, …
+  services/api.js       all calls to the backend
+
+tests/                  thesis experiment
+network_lab/            experiment results and figures
+documentation/          database design, ER diagram, screenshots
+```
+
+---
+
+## 10. Database
+
+SQLite, seven tables. It is created on the first start and updates itself when a column is added.
+
+| Table | Content |
+|---|---|
+| `users` | username, hashed password, role |
+| `devices` | name, hostname, type, server roles, management IP, SSH credentials, position, status, last configuration |
+| `connections` | the cables: both devices, both ports, access / trunk / p2p |
+| `interfaces` | port, IP, mask, mode, VLAN, up / down |
+| `vlans` | number, name, subnet, gateway |
+| `routing` | OSPF / BGP, process or AS number, networks |
+| `logs` | time, level, category, message, details |
+
+More: [DatabaseDesign.md](documentation/DatabaseDesign.md) · [ERDiagram.md](documentation/ERDiagram.md)
+
+---
+
+## 11. API
+
+Interactive documentation: **http://localhost:8000/docs** (press *Authorize* and sign in).
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/auth/login` · `register` · `logout` | accounts |
+| `GET POST /api/devices` · `GET PUT DELETE /api/devices/{id}` | devices |
+| `GET /api/devices/{id}/config` | generated Cisco IOS |
+| `POST /api/devices/{id}/status` | online / offline |
+| `GET /api/topology` · `POST DELETE /api/topology/connections` | map and cables |
+| `GET /api/topology/devices/{id}/info` | interfaces, link, VLAN, IP |
+| `POST /api/smart-config/auto` | Smart Auto Config |
+| `POST /api/smart-config/preview` · `run` | department planner, not used by the interface |
+| `POST /api/manual-config/run` | Manual Config |
+| `POST /api/monitoring/packet` | Packet test |
+| `POST /api/monitoring/ping` | Ping test: `design` (calculated), `server` (real ICMP) or `device` (over SSH) |
+| `GET /api/dashboard` · `GET /api/logs` | dashboard and logs |
+
+---
+
+## 12. Tests and the thesis experiment
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q        # unit + API tests (32)
-
-cd ..
-backend\.venv\Scripts\python.exe tests\compare_manual_vs_auto.py
+.\.venv\Scripts\python.exe -m pytest -q          # 46 tests
 ```
 
-The comparison script runs several network sizes and reports **configuration
-time, admin inputs and errors** for manual CLI vs. the platform, writing
-`network_lab/test_cases/comparison_results.{csv,md}`. AUTO numbers are measured
-from the real pipeline; MANUAL is a documented estimation model (typing speed,
-VLSM math, per-line human error rate).
+| File | Tests | Checks |
+|---|---|---|
+| `test_api.py` | 39 | accounts, devices, topology, Smart Auto, Manual Config, Packet test, Ping test |
+| `test_subnet_calculator.py` | 4 | subnets |
+| `test_config_generator.py` | 3 | Cisco IOS output |
+
+The tests use a temporary database, never yours.
+
+### Manual versus automatic
+
+```powershell
+backend\.venv\Scripts\python.exe tests\compare_manual_vs_auto.py     # from the project folder
+backend\.venv\Scripts\python.exe tests\error_category_breakdown.py
+```
+
+| Departments | Manual time | Automatic time | Manual errors | Automatic errors |
+|---|---|---|---|---|
+| 2 | 508 s | 42 s | 3.03 | 0 |
+| 4 | 824 s | 70 s | 3.77 | 0 |
+| 6 | 1140 s | 98 s | 5.70 | 0 |
+| 8 | 1456 s | 126 s | 6.37 | 0 |
+
+How to read the numbers:
+
+- **Manual** is an estimate: 4 s per IOS line, 90 s of subnet calculation per department, a 3 % chance
+  of a mistake per line and 15 % per subnet calculation, averaged over 30 simulated runs.
+- **Automatic** is the measured calculation time (a fraction of a second) plus an estimated 7 s for each
+  form field the administrator fills in.
+- The experiment uses the **department planner**, not the one-button topology mode.
+
+Results: [comparison_results.md](network_lab/test_cases/comparison_results.md)
 
 ---
 
-## 11. Database schema
+## 13. Settings and security
 
-**7 tables** (SQLite, `backend/database/network.db`):
+Copy `backend/.env.example` to `backend/.env` and change what you need:
 
-| Table | Holds |
-|---|---|
-| `users` | username, hashed password, role |
-| `devices` | name, hostname, type, server `services`, mgmt IP + SSH creds, canvas position, status, last config |
-| `connections` | cabled endpoints (device + interface on both sides), link type |
-| `vlans` | vlan id, name, subnet, gateway per device |
-| `interfaces` | name, IP/mask, mode, access VLAN, description, enabled |
-| `routing` | protocol (ospf/bgp), process id / AS, area, networks (JSON) |
-| `logs` | timestamp, level, category, message, detail |
+| Setting | Meaning | Default |
+|---|---|---|
+| `SECRET_KEY` | signs the login tokens – **change it** | example text |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | first account, created at start if it does not exist | `admin` / `admin123` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | how long you stay signed in | 480 |
+| `DEPLOY_DRY_RUN` | `true`: never send anything to devices | `false` |
+| `SSH_TIMEOUT` | seconds | 20 |
+| `DATABASE_URL` | another database | SQLite file |
 
-The DB self-migrates on startup (`PRAGMA table_info` + `ALTER TABLE ADD COLUMN`).
+This is a thesis prototype for a lab, **not for production**:
 
----
-
-## 12. Project layout
-
-```
-start.bat / stop.bat / server.vbs   Windows one-click launcher
-
-backend/
-  main.py                 FastAPI app + serves frontend/dist
-  config.py  database.py  models.py  schemas.py  seed.py  auth_utils.py
-  routers/                auth, devices, topology, smart_configuration,
-                          manual_configuration, monitoring, dashboard, logs
-  services/               auto_topology_service, smart_config_service,
-                          manual_config_service, config_generator,
-                          dhcp_service, deployment_service, monitoring_service,
-                          subnet_calculator, device_service, topology_service,
-                          logging_service
-  automation/
-    templates/*.j2        router_auto, switch_auto, router_stick, interface,
-                          vlan, dhcp, ospf, routing_manual
-    playbooks/  inventory/  generated/
-  tests/                  test_api.py, test_config_generator.py,
-                          test_subnet_calculator.py
-
-frontend/
-  src/pages/              Login, Register, Dashboard, Topology, Devices,
-                          SmartConfiguration, ManualConfiguration, Logs
-  src/components/         DeviceForm, DeviceTable, DeviceNode, PingTest,
-                          PasswordInput, …
-  src/context/AuthContext.jsx    src/services/api.js
-
-tests/compare_manual_vs_auto.py   thesis experiment
-network_lab/                       gns3/  topology/  test_cases/
-documentation/DatabaseDesign.md
-```
+- everyone who registers becomes an administrator;
+- SSH passwords are stored unencrypted in the database and in the generated Ansible files (neither is in Git);
+- account passwords are hashed (PBKDF2-SHA256);
+- `start.bat` makes the server available on your own computer only (`127.0.0.1`).
 
 ---
 
-## Default credentials
+## 14. Limitations and future work
 
-`admin` / `admin123` — or create your own account from the **Sign up** page.
-Change the default via `backend/.env` before any real use.
+- Smart Auto Config does not send its configuration to devices; use copy and paste, or Manual Config over SSH.
+- Packet test and Ping test do not check VLANs or routing protocols.
+- Not included yet: ACL editor, advanced STP, RIP, configuration backup and restore, user roles, live monitoring.

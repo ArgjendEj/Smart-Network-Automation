@@ -1,4 +1,6 @@
 """SQLAlchemy engine / session / Base."""
+from pathlib import Path
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -22,6 +24,9 @@ def init_db():
     """Create all tables. Imported models must be loaded before calling."""
     import models  # noqa: F401
 
+    # a fresh clone has no database folder yet (*.db is not in Git)
+    if settings.database_url.startswith("sqlite") and engine.url.database:
+        Path(engine.url.database).parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     _migrate()
 
