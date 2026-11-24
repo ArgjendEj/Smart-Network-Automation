@@ -1,14 +1,20 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-sqlalchemy==2.0.36
-pydantic==2.10.4
-pydantic-settings==2.7.0
+sqlalchemy==2.0.36; python_version < "3.14"
+pydantic==2.10.4; python_version < "3.14"
+pydantic-settings==2.7.0; python_version < "3.14"
 python-jose[cryptography]==3.3.0
 passlib==1.7.4
 python-multipart==0.0.20
 jinja2==3.1.5
 netmiko==4.5.0
-pyyaml==6.0.2
+pyyaml==6.0.2; python_version < "3.14"
 python-dotenv==1.0.1
-pytest==8.3.4
+pytest==8.3.4; python_version < "3.14"
 httpx==0.28.1
+# Python 3.14+: the first versions that have ready packages for it
+sqlalchemy>=2.0.44,<2.1; python_version >= "3.14"
+pydantic>=2.12,<3; python_version >= "3.14"
+pydantic-settings>=2.11,<3; python_version >= "3.14"
+pyyaml>=6.0.3,<7; python_version >= "3.14"
+pytest>=8.4,<9; python_version >= "3.14"

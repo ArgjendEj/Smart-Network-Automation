@@ -1,0 +1,688 @@
+{
+ "devices": [
+  {
+   "id": 1,
+   "name": "Router1",
+   "hostname": "R1",
+   "device_type": "router",
+   "services": "",
+   "mgmt_ip": "192.168.100.1",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": -116.59969670659194,
+   "pos_y": 85.04104720086826,
+   "status": "online",
+   "last_config": "!\n! ===== ROUTER : R1 (auto-generated from topology) =====\n!\nhostname R1\n!\nno ip domain-lookup\nip domain-name lab.local\nservice password-encryption\n!\nip routing\n!\nip dhcp excluded-address 192.168.100.1 192.168.100.1\nip dhcp excluded-address 192.168.1.1 192.168.1.1\n!\nip dhcp pool LAN_GigabitEthernet0_1\n network 192.168.100.0 255.255.255.0\n default-router 192.168.100.1\n dns-server 8.8.8.8\n!\nip dhcp pool LAN_GigabitEthernet0_3\n network 192.168.1.0 255.255.255.0\n default-router 192.168.1.1\n dns-server 8.8.8.8\n!\ninterface GigabitEthernet0/1\n description ### LAN 192.168.100.0/24 ###\n ip address 192.168.100.1 255.255.255.0\n ip nat inside\n no shutdown\n!\ninterface GigabitEthernet0/3\n description ### LAN 192.168.1.0/24 ###\n ip address 192.168.1.1 255.255.255.0\n ip nat inside\n no shutdown\n!\ninterface GigabitEthernet0/5\n description ### Link to R2 ###\n ip address 10.1.1.2 255.255.255.252\n ip nat outside\n no shutdown\n!\ninterface GigabitEthernet0/0\n description ### Link to R2 ###\n ip address 10.10.10.1 255.255.255.252\n no shutdown\n!\naccess-list 10 permit 192.168.100.0 0.0.0.255\naccess-list 11 permit 192.168.1.0 0.0.0.255\n!\nip nat inside source list 10 interface GigabitEthernet0/5 overload\nip nat inside source list 11 interface GigabitEthernet0/5 overload\n!\nrouter ospf 1\n router-id 1.1.1.1\n passive-interface GigabitEthernet0/1\n passive-interface GigabitEthernet0/3\n network 192.168.100.0 0.0.0.255 area 0\n network 192.168.1.0 0.0.0.255 area 0\n network 10.1.1.0 0.0.0.3 area 0\n network 10.10.10.0 0.0.0.3 area 0\n!\nrouter bgp 65001\n bgp router-id 1.1.1.1\n bgp log-neighbor-changes\n network 192.168.100.0 mask 255.255.255.0\n network 192.168.1.0 mask 255.255.255.0\n neighbor 10.1.1.1 remote-as 65002\n neighbor 10.10.10.2 remote-as 65002\n!\nbanner motd ^C Authorized access only - R1 ^C\n!\nline con 0\n logging synchronous\n!\nend\n"
+  },
+  {
+   "id": 2,
+   "name": "Router2",
+   "hostname": "R2",
+   "device_type": "router",
+   "services": "",
+   "mgmt_ip": "192.168.200.1",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": 292.9999877480825,
+   "pos_y": 82.00000027076061,
+   "status": "online",
+   "last_config": "!\n! ===== ROUTER : R2 (auto-generated from topology) =====\n!\nhostname R2\n!\nno ip domain-lookup\nip domain-name lab.local\nservice password-encryption\n!\nip routing\n!\nip dhcp excluded-address 192.168.200.1 192.168.200.1\nip dhcp excluded-address 192.168.2.1 192.168.2.1\n!\nip dhcp pool LAN_GigabitEthernet0_1\n network 192.168.200.0 255.255.255.0\n default-router 192.168.200.1\n dns-server 8.8.8.8\n!\nip dhcp pool LAN_GigabitEthernet0_3\n network 192.168.2.0 255.255.255.0\n default-router 192.168.2.1\n dns-server 8.8.8.8\n!\ninterface GigabitEthernet0/1\n description ### LAN 192.168.200.0/24 ###\n ip address 192.168.200.1 255.255.255.0\n ip nat inside\n no shutdown\n!\ninterface GigabitEthernet0/3\n description ### LAN 192.168.2.0/24 ###\n ip address 192.168.2.1 255.255.255.0\n ip nat inside\n no shutdown\n!\ninterface GigabitEthernet0/5\n description ### Link to R1 ###\n ip address 10.1.1.1 255.255.255.252\n ip nat outside\n no shutdown\n!\ninterface GigabitEthernet0/0\n description ### Link to R1 ###\n ip address 10.10.10.2 255.255.255.252\n no shutdown\n!\naccess-list 10 permit 192.168.200.0 0.0.0.255\naccess-list 11 permit 192.168.2.0 0.0.0.255\n!\nip nat inside source list 10 interface GigabitEthernet0/5 overload\nip nat inside source list 11 interface GigabitEthernet0/5 overload\n!\nrouter ospf 1\n router-id 2.2.2.2\n passive-interface GigabitEthernet0/1\n passive-interface GigabitEthernet0/3\n network 192.168.200.0 0.0.0.255 area 0\n network 192.168.2.0 0.0.0.255 area 0\n network 10.1.1.0 0.0.0.3 area 0\n network 10.10.10.0 0.0.0.3 area 0\n!\nrouter bgp 65002\n bgp router-id 2.2.2.2\n bgp log-neighbor-changes\n network 192.168.200.0 mask 255.255.255.0\n network 192.168.2.0 mask 255.255.255.0\n neighbor 10.1.1.2 remote-as 65001\n neighbor 10.10.10.1 remote-as 65001\n!\nbanner motd ^C Authorized access only - R2 ^C\n!\nline con 0\n logging synchronous\n!\nend\n"
+  },
+  {
+   "id": 3,
+   "name": "Switch1",
+   "hostname": "SW1",
+   "device_type": "switch",
+   "services": "",
+   "mgmt_ip": null,
+   "netmiko_driver": "cisco_ios",
+   "pos_x": -368.50786933410814,
+   "pos_y": 45.29086103173995,
+   "status": "online",
+   "last_config": "!\n! ===== SWITCH : SW1 (auto-generated from topology) =====\n!\nhostname SW1\n!\nno ip domain-lookup\n!\nspanning-tree mode pvst\n!\nvlan 100\n name DATA_VLAN100\n!\ninterface FastEthernet0/1\n description ### Uplink to R1 - DATA_VLAN100 (192.168.100.0/24) ###\n switchport mode access\n switchport access vlan 100\n no shutdown\n!\ninterface range FastEthernet0/1-24\n description ### DATA_VLAN100 access ###\n switchport mode access\n switchport access vlan 100\n spanning-tree portfast\n no shutdown\n!\nbanner motd ^C Authorized access only - SW1 ^C\n!\nline con 0\n logging synchronous\n!\nend\n"
+  },
+  {
+   "id": 4,
+   "name": "Switch2",
+   "hostname": "SW2",
+   "device_type": "switch",
+   "services": "",
+   "mgmt_ip": null,
+   "netmiko_driver": "cisco_ios",
+   "pos_x": -377.17458696901224,
+   "pos_y": 254.00996763135893,
+   "status": "online",
+   "last_config": "!\n! ===== SWITCH : SW2 (auto-generated from topology) =====\n!\nhostname SW2\n!\nno ip domain-lookup\n!\nspanning-tree mode pvst\n!\nvlan 10\n name DATA_VLAN10\n!\ninterface FastEthernet0/1\n description ### Uplink to R1 - DATA_VLAN10 (192.168.1.0/24) ###\n switchport mode access\n switchport access vlan 10\n no shutdown\n!\ninterface range FastEthernet0/1-24\n description ### DATA_VLAN10 access ###\n switchport mode access\n switchport access vlan 10\n spanning-tree portfast\n no shutdown\n!\ninterface GigabitEthernet0/1\n description ### DATA_VLAN10 access ###\n switchport mode access\n switchport access vlan 10\n spanning-tree portfast\n no shutdown\n!\nbanner motd ^C Authorized access only - SW2 ^C\n!\nline con 0\n logging synchronous\n!\nend\n"
+  },
+  {
+   "id": 5,
+   "name": "Switch1.1",
+   "hostname": "SW1.1",
+   "device_type": "switch",
+   "services": "",
+   "mgmt_ip": null,
+   "netmiko_driver": "cisco_ios",
+   "pos_x": 575.5171316696405,
+   "pos_y": -8.713338611618184,
+   "status": "online",
+   "last_config": "!\n! ===== SWITCH : SW1.1 (auto-generated from topology) =====\n!\nhostname SW1.1\n!\nno ip domain-lookup\n!\nspanning-tree mode pvst\n!\nvlan 200\n name DATA_VLAN200\n!\ninterface FastEthernet0/1\n description ### Uplink to R2 - DATA_VLAN200 (192.168.200.0/24) ###\n switchport mode access\n switchport access vlan 200\n no shutdown\n!\ninterface range FastEthernet0/1-24\n description ### DATA_VLAN200 access ###\n switchport mode access\n switchport access vlan 200\n spanning-tree portfast\n no shutdown\n!\nbanner motd ^C Authorized access only - SW1.1 ^C\n!\nline con 0\n logging synchronous\n!\nend\n"
+  },
+  {
+   "id": 6,
+   "name": "Switch2.2",
+   "hostname": "SW2.2",
+   "device_type": "switch",
+   "services": "",
+   "mgmt_ip": null,
+   "netmiko_driver": "cisco_ios",
+   "pos_x": 566.2475522030279,
+   "pos_y": 176.11755603514877,
+   "status": "online",
+   "last_config": "!\n! ===== SWITCH : SW2.2 (auto-generated from topology) =====\n!\nhostname SW2.2\n!\nno ip domain-lookup\n!\nspanning-tree mode pvst\n!\nvlan 20\n name DATA_VLAN20\n!\ninterface FastEthernet0/1\n description ### Uplink to R2 - DATA_VLAN20 (192.168.2.0/24) ###\n switchport mode access\n switchport access vlan 20\n no shutdown\n!\ninterface range FastEthernet0/1-24\n description ### DATA_VLAN20 access ###\n switchport mode access\n switchport access vlan 20\n spanning-tree portfast\n no shutdown\n!\nbanner motd ^C Authorized access only - SW2.2 ^C\n!\nline con 0\n logging synchronous\n!\nend\n"
+  },
+  {
+   "id": 7,
+   "name": "PC1",
+   "hostname": "PC1",
+   "device_type": "pc",
+   "services": "",
+   "mgmt_ip": "192.168.100.3",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": -494.04230396749654,
+   "pos_y": -167.21070968130545,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 8,
+   "name": "PC2",
+   "hostname": "PC2",
+   "device_type": "pc",
+   "services": "",
+   "mgmt_ip": "192.168.100.4",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": -312.65697887726833,
+   "pos_y": -215.77574970856276,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 9,
+   "name": "Phone1",
+   "hostname": "IPH1",
+   "device_type": "ip_phone",
+   "services": "",
+   "mgmt_ip": "192.168.100.2",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": -149.92880655437557,
+   "pos_y": -135.2609086409659,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 10,
+   "name": "Printer1",
+   "hostname": "Print1",
+   "device_type": "printer",
+   "services": "",
+   "mgmt_ip": "192.168.100.5",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": -638.8818063775786,
+   "pos_y": -121.19228787745693,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 11,
+   "name": "PC3",
+   "hostname": "PC3",
+   "device_type": "pc",
+   "services": "",
+   "mgmt_ip": "192.168.1.3",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": -658.4725062641269,
+   "pos_y": 397.9647514610472,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 12,
+   "name": "PC4",
+   "hostname": "PC4",
+   "device_type": "pc",
+   "services": "",
+   "mgmt_ip": "192.168.1.4",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": -511.9614494641309,
+   "pos_y": 442.5640503933822,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 13,
+   "name": "Phone2",
+   "hostname": "IPH2",
+   "device_type": "ip_phone",
+   "services": "",
+   "mgmt_ip": "192.168.1.2",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": -324.7374796272383,
+   "pos_y": 394.1025679234367,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 14,
+   "name": "Printer2",
+   "hostname": "Print2",
+   "device_type": "printer",
+   "services": "",
+   "mgmt_ip": "192.168.1.5",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": -115.29986898663043,
+   "pos_y": 424.27357100773634,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 15,
+   "name": "PC1.1",
+   "hostname": "PC1.1",
+   "device_type": "pc",
+   "services": "",
+   "mgmt_ip": "192.168.200.3",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": 428.45082920073924,
+   "pos_y": -171.14664197848262,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 16,
+   "name": "PC2.2",
+   "hostname": "PC2.2",
+   "device_type": "pc",
+   "services": "",
+   "mgmt_ip": "192.168.200.4",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": 576.6031181168174,
+   "pos_y": -223.6428988368527,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 17,
+   "name": "Phone1.1",
+   "hostname": "IPH1.1",
+   "device_type": "ip_phone",
+   "services": "",
+   "mgmt_ip": "192.168.200.2",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": 723.7834657746398,
+   "pos_y": -154.5154235354073,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 18,
+   "name": "Printer1.1",
+   "hostname": "Print1.1",
+   "device_type": "printer",
+   "services": "",
+   "mgmt_ip": "192.168.200.5",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": 747.3224644831168,
+   "pos_y": -32.40686773518297,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 19,
+   "name": "PC3.3",
+   "hostname": "PC3.3",
+   "device_type": "pc",
+   "services": "",
+   "mgmt_ip": "192.168.2.3",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": 438.7616141800305,
+   "pos_y": 328.2483005834116,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 20,
+   "name": "PC4.4",
+   "hostname": "PC4.4",
+   "device_type": "pc",
+   "services": "",
+   "mgmt_ip": "192.168.2.4",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": 588.5342068119165,
+   "pos_y": 386.06453782380754,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 21,
+   "name": "Phone2.2",
+   "hostname": "IPH2.2",
+   "device_type": "ip_phone",
+   "services": "",
+   "mgmt_ip": "192.168.2.2",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": 261.07359735163516,
+   "pos_y": 380.7282696699927,
+   "status": "online",
+   "last_config": null
+  },
+  {
+   "id": 22,
+   "name": "Printer2.2",
+   "hostname": "Print2.2",
+   "device_type": "printer",
+   "services": "",
+   "mgmt_ip": "192.168.2.5",
+   "netmiko_driver": "cisco_ios",
+   "pos_x": 772.1825005398111,
+   "pos_y": 211.035724762617,
+   "status": "online",
+   "last_config": null
+  }
+ ],
+ "connections": [
+  {
+   "id": 3,
+   "a_device_id": 3,
+   "b_device_id": 1,
+   "a_interface": "FastEthernet0/1",
+   "b_interface": "GigabitEthernet0/1",
+   "link_type": "access",
+   "status": "up"
+  },
+  {
+   "id": 4,
+   "a_device_id": 4,
+   "b_device_id": 1,
+   "a_interface": "FastEthernet0/1",
+   "b_interface": "GigabitEthernet0/3",
+   "link_type": "access",
+   "status": "up"
+  },
+  {
+   "id": 5,
+   "a_device_id": 2,
+   "b_device_id": 5,
+   "a_interface": "GigabitEthernet0/1",
+   "b_interface": "FastEthernet0/1",
+   "link_type": "access",
+   "status": "up"
+  },
+  {
+   "id": 6,
+   "a_device_id": 2,
+   "b_device_id": 6,
+   "a_interface": "GigabitEthernet0/3",
+   "b_interface": "FastEthernet0/1",
+   "link_type": "access",
+   "status": "up"
+  },
+  {
+   "id": 7,
+   "a_device_id": 7,
+   "b_device_id": 3,
+   "a_interface": "eth0",
+   "b_interface": "FastEthernet0/2",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 8,
+   "a_device_id": 3,
+   "b_device_id": 8,
+   "a_interface": "FastEthernet0/3",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 9,
+   "a_device_id": 3,
+   "b_device_id": 9,
+   "a_interface": "FastEthernet0/4",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 10,
+   "a_device_id": 3,
+   "b_device_id": 10,
+   "a_interface": "FastEthernet0/5",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 11,
+   "a_device_id": 4,
+   "b_device_id": 11,
+   "a_interface": "FastEthernet0/5",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 12,
+   "a_device_id": 4,
+   "b_device_id": 12,
+   "a_interface": "FastEthernet0/6",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 13,
+   "a_device_id": 4,
+   "b_device_id": 13,
+   "a_interface": "FastEthernet0/7",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 14,
+   "a_device_id": 4,
+   "b_device_id": 14,
+   "a_interface": "GigabitEthernet0/1",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 15,
+   "a_device_id": 5,
+   "b_device_id": 15,
+   "a_interface": "FastEthernet0/2",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 16,
+   "a_device_id": 5,
+   "b_device_id": 16,
+   "a_interface": "FastEthernet0/3",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 17,
+   "a_device_id": 5,
+   "b_device_id": 17,
+   "a_interface": "FastEthernet0/4",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 18,
+   "a_device_id": 5,
+   "b_device_id": 18,
+   "a_interface": "FastEthernet0/5",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 19,
+   "a_device_id": 6,
+   "b_device_id": 19,
+   "a_interface": "FastEthernet0/5",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 20,
+   "a_device_id": 6,
+   "b_device_id": 20,
+   "a_interface": "FastEthernet0/6",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 21,
+   "a_device_id": 6,
+   "b_device_id": 21,
+   "a_interface": "FastEthernet0/2",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  },
+  {
+   "id": 23,
+   "a_device_id": 1,
+   "b_device_id": 2,
+   "a_interface": "GigabitEthernet0/5",
+   "b_interface": "GigabitEthernet0/5",
+   "link_type": "p2p",
+   "status": "up"
+  },
+  {
+   "id": 24,
+   "a_device_id": 1,
+   "b_device_id": 2,
+   "a_interface": "GigabitEthernet0/0",
+   "b_interface": "GigabitEthernet0/0",
+   "link_type": "p2p",
+   "status": "up"
+  },
+  {
+   "id": 25,
+   "a_device_id": 6,
+   "b_device_id": 22,
+   "a_interface": "FastEthernet0/3",
+   "b_interface": "eth0",
+   "link_type": "trunk",
+   "status": "up"
+  }
+ ],
+ "interfaces": [
+  {
+   "id": 673,
+   "device_id": 1,
+   "name": "GigabitEthernet0/1",
+   "ip_address": "192.168.100.1",
+   "subnet_mask": "255.255.255.0",
+   "mode": "routed",
+   "vlan_id": null,
+   "description": "LAN 192.168.100.0/24",
+   "enabled": true
+  },
+  {
+   "id": 674,
+   "device_id": 1,
+   "name": "GigabitEthernet0/3",
+   "ip_address": "192.168.1.1",
+   "subnet_mask": "255.255.255.0",
+   "mode": "routed",
+   "vlan_id": null,
+   "description": "LAN 192.168.1.0/24",
+   "enabled": true
+  },
+  {
+   "id": 675,
+   "device_id": 1,
+   "name": "GigabitEthernet0/5",
+   "ip_address": "10.1.1.2",
+   "subnet_mask": "255.255.255.252",
+   "mode": "routed",
+   "vlan_id": null,
+   "description": "link to R2",
+   "enabled": true
+  },
+  {
+   "id": 676,
+   "device_id": 1,
+   "name": "GigabitEthernet0/0",
+   "ip_address": "10.10.10.1",
+   "subnet_mask": "255.255.255.252",
+   "mode": "routed",
+   "vlan_id": null,
+   "description": "link to R2",
+   "enabled": true
+  },
+  {
+   "id": 677,
+   "device_id": 2,
+   "name": "GigabitEthernet0/1",
+   "ip_address": "192.168.200.1",
+   "subnet_mask": "255.255.255.0",
+   "mode": "routed",
+   "vlan_id": null,
+   "description": "LAN 192.168.200.0/24",
+   "enabled": true
+  },
+  {
+   "id": 678,
+   "device_id": 2,
+   "name": "GigabitEthernet0/3",
+   "ip_address": "192.168.2.1",
+   "subnet_mask": "255.255.255.0",
+   "mode": "routed",
+   "vlan_id": null,
+   "description": "LAN 192.168.2.0/24",
+   "enabled": true
+  },
+  {
+   "id": 679,
+   "device_id": 2,
+   "name": "GigabitEthernet0/5",
+   "ip_address": "10.1.1.1",
+   "subnet_mask": "255.255.255.252",
+   "mode": "routed",
+   "vlan_id": null,
+   "description": "link to R1",
+   "enabled": true
+  },
+  {
+   "id": 680,
+   "device_id": 2,
+   "name": "GigabitEthernet0/0",
+   "ip_address": "10.10.10.2",
+   "subnet_mask": "255.255.255.252",
+   "mode": "routed",
+   "vlan_id": null,
+   "description": "link to R1",
+   "enabled": true
+  }
+ ],
+ "vlans": [
+  {
+   "id": 473,
+   "device_id": 1,
+   "vlan_id": 100,
+   "name": "DATA_VLAN100",
+   "department": null,
+   "subnet": "192.168.100.0/24",
+   "gateway": "192.168.100.1"
+  },
+  {
+   "id": 474,
+   "device_id": 1,
+   "vlan_id": 10,
+   "name": "DATA_VLAN10",
+   "department": null,
+   "subnet": "192.168.1.0/24",
+   "gateway": "192.168.1.1"
+  },
+  {
+   "id": 475,
+   "device_id": 2,
+   "vlan_id": 200,
+   "name": "DATA_VLAN200",
+   "department": null,
+   "subnet": "192.168.200.0/24",
+   "gateway": "192.168.200.1"
+  },
+  {
+   "id": 476,
+   "device_id": 2,
+   "vlan_id": 20,
+   "name": "DATA_VLAN20",
+   "department": null,
+   "subnet": "192.168.2.0/24",
+   "gateway": "192.168.2.1"
+  },
+  {
+   "id": 477,
+   "device_id": 3,
+   "vlan_id": 100,
+   "name": "DATA_VLAN100",
+   "department": null,
+   "subnet": "192.168.100.0/24",
+   "gateway": "192.168.100.1"
+  },
+  {
+   "id": 478,
+   "device_id": 4,
+   "vlan_id": 10,
+   "name": "DATA_VLAN10",
+   "department": null,
+   "subnet": "192.168.1.0/24",
+   "gateway": "192.168.1.1"
+  },
+  {
+   "id": 479,
+   "device_id": 5,
+   "vlan_id": 200,
+   "name": "DATA_VLAN200",
+   "department": null,
+   "subnet": "192.168.200.0/24",
+   "gateway": "192.168.200.1"
+  },
+  {
+   "id": 480,
+   "device_id": 6,
+   "vlan_id": 20,
+   "name": "DATA_VLAN20",
+   "department": null,
+   "subnet": "192.168.2.0/24",
+   "gateway": "192.168.2.1"
+  }
+ ],
+ "routing": [
+  {
+   "id": 1,
+   "device_id": 1,
+   "protocol": "ospf",
+   "process_id": 1,
+   "area": "0",
+   "networks": "[\"192.168.100.0 0.0.0.255 area 0\", \"192.168.1.0 0.0.0.255 area 0\", \"10.1.1.0 0.0.0.3 area 0\", \"10.10.10.0 0.0.0.3 area 0\"]"
+  },
+  {
+   "id": 2,
+   "device_id": 1,
+   "protocol": "bgp",
+   "process_id": 65001,
+   "area": "0",
+   "networks": "[\"192.168.100.0 0.0.0.255 area 0\", \"192.168.1.0 0.0.0.255 area 0\", \"10.1.1.0 0.0.0.3 area 0\", \"10.10.10.0 0.0.0.3 area 0\"]"
+  },
+  {
+   "id": 3,
+   "device_id": 2,
+   "protocol": "ospf",
+   "process_id": 1,
+   "area": "0",
+   "networks": "[\"192.168.200.0 0.0.0.255 area 0\", \"192.168.2.0 0.0.0.255 area 0\", \"10.1.1.0 0.0.0.3 area 0\", \"10.10.10.0 0.0.0.3 area 0\"]"
+  },
+  {
+   "id": 4,
+   "device_id": 2,
+   "protocol": "bgp",
+   "process_id": 65002,
+   "area": "0",
+   "networks": "[\"192.168.200.0 0.0.0.255 area 0\", \"192.168.2.0 0.0.0.255 area 0\", \"10.1.1.0 0.0.0.3 area 0\", \"10.10.10.0 0.0.0.3 area 0\"]"
+  }
+ ]
+}

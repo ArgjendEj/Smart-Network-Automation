@@ -40,33 +40,25 @@ This repository is the **MVP** (minimum viable product) of the thesis.
 
 ## 1. Installation
 
-**You need:** Windows, [Python 3.11, 3.12 or 3.13](https://www.python.org/downloads/) (3.14 and newer
-do not work yet) and [Node.js 18+](https://nodejs.org/). Put the project in a short path, such as the Desktop.
+**You need:** Windows, [Python 3.13](https://www.python.org/downloads/) (3.11 and 3.12 work too) and
+[Node.js 18+](https://nodejs.org/). Put the project in a short path, such as the Desktop.
 
-### First time only
+1. Download the project: `git clone https://github.com/ArgjendEj/Smart-Network-Automation.git`,
+   or **Code → Download ZIP** on GitHub and extract it.
+2. Double-click **`start.bat`**. The first time it installs everything and builds the interface
+   (a few minutes, internet needed); after that it starts in seconds.
+3. The browser opens **http://localhost:8000**. Sign in with **`admin` / `admin123`**.
 
-```powershell
-git clone https://github.com/ArgjendEj/Smart-Network-Automation.git
-cd Smart-Network-Automation\backend
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-### Every time
-
-| To | Do this |
-|---|---|
-| **Start** | double-click `start.bat`. It opens **http://localhost:8000** (the first start also builds the interface, about 30 seconds) |
-| **Stop** | double-click `stop.bat` |
-
-Sign in with **`admin` / `admin123`**. On the first start the database is created with
-four demo devices: R1, SW1, PC1 and PC2.
+A new installation starts with the **example network** of the thesis: 2 routers, 4 switches, 8 PCs,
+4 IP phones and 4 printers, already configured. Double-click **`stop.bat`** to stop the server.
 
 ### For development
 
 ```powershell
 # backend, restarts itself when the code changes
 cd backend
+python -m venv .venv                                              # once
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt     # once
 .\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
 
 # frontend, in a second terminal: http://localhost:5173
@@ -79,32 +71,31 @@ npm run dev
 
 | Problem | Solution |
 |---|---|
-| `start.bat` opens a page that cannot be reached | `backend\.venv` is missing: run the *First time only* steps |
+| `start.bat` says Python or Node.js was not found | install it, then run `start.bat` again |
 | The page still looks old | press **Ctrl+F5** |
 | Changed the frontend code, nothing happens | `cd frontend`, then `npm run build` |
 | Changed the backend code, nothing happens | `stop.bat`, then `start.bat` |
 | `pip` ends with *No such file or directory* and *Long Path* | the folder path is too long: move the project closer to `C:\` |
-| `pip` cannot find a version of `pyyaml` | Python is too new: install 3.13 |
+| The packages cannot be installed | use Python 3.13; newer versions are not tested yet |
 | Port 8000 is already in use | `stop.bat` ends whatever is running on it |
 
 ---
 
 ## 2. Your first network in 5 minutes
 
-Uses the four demo devices of a new installation.
+Add a PC to the example network and let the platform configure it.
 
-1. **Network Topology** – drag a cable from a blue dot of one device to a blue dot of another:
-   `R1` → `SW1`, `SW1` → `PC1`, `SW1` → `PC2`. For the PCs the app asks *Trunk link?*: choose **Cancel** (access).
-2. **Smart Auto Config** – choose **OSPF** and press **🏠 Configure local networks + DHCP**.
+1. **Devices → + Add device** – Name `PC5`, Hostname `PC5`, Type `PC`, **Save**.
+2. **Network Topology** – drag a cable from a free dot on top of `Switch2` to a dot of `PC5`
+   (a new device appears in the middle of the map). The app asks *Trunk link?*: choose **Cancel** (access).
+3. **Smart Auto Config** – choose **OSPF + BGP** and press **🏠 Configure local networks + DHCP**.
+   `PC5` gets an address in `192.168.1.0/24`, with gateway `192.168.1.1`.
+4. **Network Topology** – under the map, in **Packet test**, choose Source `PC5`, Destination `PC1.1`, press **Send**.
+   The envelope travels PC5 → Switch2 → Router1 → Router2 → Switch1.1 → PC1.1 and comes back with **✓ Successful**.
+5. **Devices** – press **Config** next to a router or switch to read the generated Cisco IOS.
 
-   ```
-   R1 · router-id 1.1.1.1 · OSPF area 0
-   LAN GigabitEthernet0/0 → 192.168.10.0/24 · gateway 192.168.10.2 · VLAN 100
-   PC1 192.168.10.3      PC2 192.168.10.4
-   ```
-3. **Network Topology** – under the map, in **Packet test**, choose Source `PC1`, Destination `PC2`, press **Send**.
-   The envelope travels PC1 → SW1 → PC2 and comes back with **✓ Successful**.
-4. **Devices** – press **Config** next to `R1` or `SW1` to read the generated Cisco IOS.
+To start from a small network (R1, SW1, PC1, PC2) or an empty one instead, set `DEMO_NETWORK`
+([section 13](#13-settings-and-security)) before the first start.
 
 ---
 
@@ -317,7 +308,7 @@ browser ──► http://localhost:8000
 
 | Part | Technology |
 |---|---|
-| Backend | Python 3.11 – 3.13, FastAPI, SQLAlchemy 2, Pydantic 2, SQLite, JWT |
+| Backend | Python, FastAPI, SQLAlchemy 2, Pydantic 2, SQLite, JWT |
 | Automation | Jinja2, Netmiko, generated Ansible files |
 | Frontend | React 18, Vite, React Router, React Flow, Axios |
 
@@ -339,7 +330,8 @@ backend/
     smart_config_service.py      department planner (API only)
     subnet_calculator.py  logging_service.py
   automation/templates/          Jinja2 templates (*.j2)
-  tests/                         46 automated tests
+  demo_network.json              the example network of a new installation
+  tests/                         49 automated tests
 
 frontend/src/
   pages/                Login, Register, Dashboard, Topology, Devices,
@@ -399,7 +391,7 @@ Interactive documentation: **http://localhost:8000/docs** (press *Authorize* and
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q          # 46 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 49 tests
 ```
 
 | File | Tests | Checks |
@@ -407,6 +399,7 @@ cd backend
 | `test_api.py` | 39 | accounts, devices, topology, Smart Auto, Manual Config, Packet test, Ping test |
 | `test_subnet_calculator.py` | 4 | subnets |
 | `test_config_generator.py` | 3 | Cisco IOS output |
+| `test_seed.py` | 3 | what a new installation starts with |
 
 The tests use a temporary database, never yours.
 
@@ -444,6 +437,7 @@ Copy `backend/.env.example` to `backend/.env` and change what you need:
 |---|---|---|
 | `SECRET_KEY` | signs the login tokens – **change it** | example text |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | first account, created at start if it does not exist | `admin` / `admin123` |
+| `DEMO_NETWORK` | network of a new, empty database: `example`, `small` or `none` | `example` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | how long you stay signed in | 480 |
 | `DEPLOY_DRY_RUN` | `true`: never send anything to devices | `false` |
 | `SSH_TIMEOUT` | seconds | 20 |

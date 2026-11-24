@@ -40,33 +40,25 @@ Ky repo është **MVP-ja** (versioni minimal funksional) i temës.
 
 ## 1. Instalimi
 
-**Të duhen:** Windows, [Python 3.11, 3.12 ose 3.13](https://www.python.org/downloads/) (3.14 e më të rinj
-ende nuk punojnë) dhe [Node.js 18+](https://nodejs.org/). Vendose projektin në një rrugë të shkurtër, p.sh. Desktop.
+**Të duhen:** Windows, [Python 3.13](https://www.python.org/downloads/) (punojnë edhe 3.11 dhe 3.12) dhe
+[Node.js 18+](https://nodejs.org/). Vendose projektin në një rrugë të shkurtër, p.sh. Desktop.
 
-### Vetëm herën e parë
+1. Shkarko projektin: `git clone https://github.com/ArgjendEj/Smart-Network-Automation.git`,
+   ose **Code → Download ZIP** në GitHub dhe nxirre.
+2. Kliko dy herë **`start.bat`**. Herën e parë instalon gjithçka dhe ndërton ndërfaqen
+   (disa minuta, duhet internet); pas kësaj niset për pak sekonda.
+3. Browser-i hap **http://localhost:8000**. Hyr me **`admin` / `admin123`**.
 
-```powershell
-git clone https://github.com/ArgjendEj/Smart-Network-Automation.git
-cd Smart-Network-Automation\backend
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-### Çdo herë
-
-| Për ta | Bëj këtë |
-|---|---|
-| **Nisur** | kliko dy herë `start.bat`. Hapet **http://localhost:8000** (herën e parë ndërtohet edhe ndërfaqja, rreth 30 sekonda) |
-| **Ndalur** | kliko dy herë `stop.bat` |
-
-Hyr me **`admin` / `admin123`**. Në nisjen e parë krijohet databaza me katër pajisje
-shembull: R1, SW1, PC1 dhe PC2.
+Një instalim i ri fillon me **rrjetin shembull** të temës: 2 routera, 4 switch-e, 8 PC,
+4 telefona IP dhe 4 printera, të konfiguruar. Kliko dy herë **`stop.bat`** për ta ndalur serverin.
 
 ### Për zhvillim
 
 ```powershell
 # backend-i, riniset vetë kur ndryshon kodi
 cd backend
+python -m venv .venv                                              # një herë
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt     # një herë
 .\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
 
 # frontend-i, në një terminal të dytë: http://localhost:5173
@@ -79,32 +71,31 @@ npm run dev
 
 | Problemi | Zgjidhja |
 |---|---|
-| `start.bat` hap një faqe që nuk arrihet | mungon `backend\.venv`: bëj hapat *Vetëm herën e parë* |
+| `start.bat` thotë se Python ose Node.js nuk u gjet | instaloje, pastaj nis përsëri `start.bat` |
 | Faqja duket ende e vjetër | shtyp **Ctrl+F5** |
 | Ndryshova kodin e frontend-it dhe nuk duket | `cd frontend`, pastaj `npm run build` |
 | Ndryshova kodin e backend-it dhe nuk duket | `stop.bat`, pastaj `start.bat` |
 | `pip` përfundon me *No such file or directory* dhe *Long Path* | rruga e dosjes është shumë e gjatë: zhvendose projektin më afër `C:\` |
-| `pip` nuk gjen version të `pyyaml` | Python është shumë i ri: instalo 3.13 |
+| Paketat nuk instalohen | përdor Python 3.13; versionet më të reja nuk janë testuar ende |
 | Porti 8000 është i zënë | `stop.bat` mbyll çdo gjë që punon në të |
 
 ---
 
 ## 2. Rrjeti yt i parë në 5 minuta
 
-Përdor katër pajisjet shembull të një instalimi të ri.
+Shto një PC në rrjetin shembull dhe lëre platformën ta konfigurojë.
 
-1. **Network Topology** – tërhiq një kabllo nga pika e kaltër e një pajisjeje te pika e kaltër e tjetrës:
-   `R1` → `SW1`, `SW1` → `PC1`, `SW1` → `PC2`. Për PC-të aplikacioni pyet *Trunk link?*: zgjidh **Cancel** (access).
-2. **Smart Auto Config** – zgjidh **OSPF** dhe kliko **🏠 Configure local networks + DHCP**.
+1. **Devices → + Add device** – Name `PC5`, Hostname `PC5`, Type `PC`, **Save**.
+2. **Network Topology** – tërhiq një kabllo nga një pikë e lirë sipër `Switch2` te një pikë e `PC5`
+   (pajisja e re del në mes të hartës). Aplikacioni pyet *Trunk link?*: zgjidh **Cancel** (access).
+3. **Smart Auto Config** – zgjidh **OSPF + BGP** dhe kliko **🏠 Configure local networks + DHCP**.
+   `PC5` merr adresë në `192.168.1.0/24`, me gateway `192.168.1.1`.
+4. **Network Topology** – poshtë hartës, te **Packet test**, zgjidh Source `PC5`, Destination `PC1.1` dhe kliko **Send**.
+   Zarfi udhëton PC5 → Switch2 → Router1 → Router2 → Switch1.1 → PC1.1 dhe kthehet me **✓ Successful**.
+5. **Devices** – kliko **Config** te një router ose switch për të lexuar Cisco IOS të gjeneruar.
 
-   ```
-   R1 · router-id 1.1.1.1 · OSPF area 0
-   LAN GigabitEthernet0/0 → 192.168.10.0/24 · gateway 192.168.10.2 · VLAN 100
-   PC1 192.168.10.3      PC2 192.168.10.4
-   ```
-3. **Network Topology** – poshtë hartës, te **Packet test**, zgjidh Source `PC1`, Destination `PC2` dhe kliko **Send**.
-   Zarfi udhëton PC1 → SW1 → PC2 dhe kthehet me **✓ Successful**.
-4. **Devices** – kliko **Config** te `R1` ose `SW1` për të lexuar Cisco IOS të gjeneruar.
+Për të filluar me një rrjet të vogël (R1, SW1, PC1, PC2) ose bosh, vendos `DEMO_NETWORK`
+([seksioni 13](#13-cilësimet-dhe-siguria)) para nisjes së parë.
 
 ---
 
@@ -317,7 +308,7 @@ browser ──► http://localhost:8000
 
 | Pjesa | Teknologjia |
 |---|---|
-| Backend | Python 3.11 – 3.13, FastAPI, SQLAlchemy 2, Pydantic 2, SQLite, JWT |
+| Backend | Python, FastAPI, SQLAlchemy 2, Pydantic 2, SQLite, JWT |
 | Automatizimi | Jinja2, Netmiko, skedarë Ansible të gjeneruar |
 | Frontend | React 18, Vite, React Router, React Flow, Axios |
 
@@ -339,7 +330,8 @@ backend/
     smart_config_service.py      planifikuesi i departamenteve (vetëm API)
     subnet_calculator.py  logging_service.py
   automation/templates/          template-t Jinja2 (*.j2)
-  tests/                         46 teste automatike
+  demo_network.json              rrjeti shembull i një instalimi të ri
+  tests/                         49 teste automatike
 
 frontend/src/
   pages/                Login, Register, Dashboard, Topology, Devices,
@@ -399,7 +391,7 @@ Dokumentimi interaktiv: **http://localhost:8000/docs** (kliko *Authorize* dhe hy
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q          # 46 teste
+.\.venv\Scripts\python.exe -m pytest -q          # 49 teste
 ```
 
 | Skedari | Teste | Çfarë kontrollon |
@@ -407,6 +399,7 @@ cd backend
 | `test_api.py` | 39 | llogaritë, pajisjet, topologjinë, Smart Auto, Manual Config, Packet test, Ping test |
 | `test_subnet_calculator.py` | 4 | subnet-et |
 | `test_config_generator.py` | 3 | tekstin Cisco IOS |
+| `test_seed.py` | 3 | me çfarë fillon një instalim i ri |
 
 Testet përdorin një databazë të përkohshme, asnjëherë tënden.
 
@@ -444,6 +437,7 @@ Kopjo `backend/.env.example` si `backend/.env` dhe ndrysho çfarë të duhet:
 |---|---|---|
 | `SECRET_KEY` | nënshkruan tokenat e hyrjes – **ndryshoje** | tekst shembull |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | llogaria e parë, krijohet në nisje nëse nuk ekziston | `admin` / `admin123` |
+| `DEMO_NETWORK` | rrjeti i një databaze të re bosh: `example`, `small` ose `none` | `example` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | sa kohë mbetesh i kyçur | 480 |
 | `DEPLOY_DRY_RUN` | `true`: nuk dërgon kurrë asgjë te pajisjet | `false` |
 | `SSH_TIMEOUT` | sekonda | 20 |

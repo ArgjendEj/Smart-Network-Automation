@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = "admin123"
 
+    # --- Network loaded into a new, empty database: example | small | none ---
+    demo_network: str = "example"
+
     # --- Database ---
     database_url: str = f"sqlite:///{(BASE_DIR / 'database' / 'network.db').as_posix()}"
 

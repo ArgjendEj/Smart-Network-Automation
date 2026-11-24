@@ -26,7 +26,7 @@ from seed import seed
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    seed()
+    seed(with_demo=settings.demo_network != "none", example=settings.demo_network == "example")
     yield
 
 
